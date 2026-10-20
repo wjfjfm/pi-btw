@@ -42,8 +42,10 @@ test('bidirectional shortcuts, merge target/mode menu and close confirmation',()
   const before=f.actions.length;
   for(const key of ['\x1b[110;7u','\x1b[109;7u','\x1b[120;7u'])f.view.handleInput(key);
   assert.equal(f.actions.length,before);
-  f.view.showMerge();f.view.handleInput('m');f.view.handleInput('s');
+  f.view.showMerge();f.view.handleInput('s');
   assert.deepEqual(f.actions.at(-1),{kind:'command',text:'merge main summary'});
+  f.view.showMerge('source');f.view.handleInput('f');
+  assert.deepEqual(f.actions.at(-1),{kind:'command',text:'merge source full'});
   f.view.showClose();const n=f.actions.length;f.view.handleInput('n');assert.equal(f.actions.length,n);
   f.view.showClose();f.view.handleInput('y');assert.equal(f.actions.at(-1).kind,'close');f.view.dispose();
 });

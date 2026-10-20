@@ -32,7 +32,7 @@ pi -e /path/to/pi-btw/src/index.ts
 
 前后切换按创建顺序循环，包含主会话。BTW 专用快捷键仅前后切换和 Esc，显示在底栏。`Ctrl+B/F` 占用原来的左右移光标快捷键，仍可使用方向键。新建、合并和关闭使用命令。若 tmux 使用默认 `Ctrl+B` 前缀，按两次 `Ctrl+B` 才会将该按键发送给 Pi；也可用 `/btw prev`。
 
-`/btw list` 列出 main 和全部 BTW 的来源、运行状态；选择后切换，取消则留在当前会话。
+`/btw list` 按 source 关系树状显示 main 和全部 BTW，标注来源、运行状态；选择后切换，取消则留在当前会话。来源已关闭的分支仍列出，并标注 `(closed)`。
 
 在当前 BTW 中也可使用：
 
@@ -41,6 +41,7 @@ pi -e /path/to/pi-btw/src/index.ts
 /btw next
 /btw prev
 /btw merge
+/btw merge source
 /btw merge source full
 /btw merge source summary
 /btw merge main full
@@ -48,7 +49,7 @@ pi -e /path/to/pi-btw/src/index.ts
 /btw close
 ```
 
-`/btw merge full|summary` 默认目标为 source。不提供 `/merge` 或 `/main` 命令。主界面要合并/关闭已有 BTW，请先切换到它。
+`/btw merge` 默认目标为 main，弹出原文/summary 选择；`/btw merge full|summary` 也默认合并到 main。只有显式 `/btw merge source [full|summary]` 才合并到直接来源。不提供 `/merge` 或 `/main` 命令。主界面要合并/关闭已有 BTW，请先切换到它。
 
 `source` 是直接来源；`main` 是最初主会话。关闭只结束当前 BTW，不关闭其后代。source 已关闭时，合并到 source 明确报错，仍可合并到 main。关闭保留 session 文件。
 

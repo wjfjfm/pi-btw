@@ -12,8 +12,8 @@ export class BtwView {
   private unsubscribe: () => void;
   private offset = 0;
   private error = "";
-  private menu?: "target" | "mode" | "close";
-  private destination = "source";
+  private menu?: "mode" | "close";
+  private destination = "main";
   private cache?: { width: number; lines: string[] };
   private history?: { width: number; messages: Tab["child"]["session"]["messages"]; lines: string[] };
   constructor(private tui: TUI, private theme: Theme, private tab: Tab,
@@ -36,13 +36,12 @@ export class BtwView {
   invalidate() { this.cache = undefined; this.history = undefined; this.editor.invalidate(); }
   saveDraft() { this.tab.draft = this.editor.getText(); }
   dispose() { this.saveDraft(); this.unsubscribe(); }
-  showMerge() { this.menu = "target"; this.tui.requestRender(); }
+  showMerge(target: "main" | "source" = "main") { this.destination = target; this.menu = "mode"; this.tui.requestRender(); }
   showClose() { this.menu = "close"; this.tui.requestRender(); }
   handleInput(data: string) {
     if (this.menu) {
       if (matchesKey(data,"escape") || data === "n") this.menu = undefined;
       else if (this.menu === "close" && data === "y") this.action({kind:"close"});
-      else if (this.menu === "target" && (data === "s" || data === "m")) { this.destination = data === "s" ? "source" : "main"; this.menu = "mode"; }
       else if (this.menu === "mode" && (data === "f" || data === "s")) this.action({kind:"command",text:`merge ${this.destination} ${data === "f" ? "full" : "summary"}`});
       this.tui.requestRender(); return;
     }
@@ -92,8 +91,7 @@ export class BtwView {
   render(width: number): string[] {
     const height = Math.max(4,this.tui.terminal.rows);
     const session = this.tab.child.session;
-    const hint = this.menu === "target" ? "Merge to: [s] source  [m] main  [Esc] cancel"
-      : this.menu === "mode" ? `Merge to ${this.destination}: [f] full  [s] summary  [Esc] cancel`
+    const hint = this.menu === "mode" ? `Merge to ${this.destination}: [f] full  [s] summary  [Esc] cancel`
       : this.menu === "close" ? "Close this BTW? Background execution will stop. [y] yes  [n/Esc] cancel"
       : this.error || session.error || this.tab.notice || "";
     const footer = wrapTextWithAnsi(hint ? `${hint}\n${HELP}` : HELP,Math.max(1,width)).slice(0,Math.max(1,Math.floor(height/3)));

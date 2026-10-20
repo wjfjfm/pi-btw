@@ -18,6 +18,7 @@ export default function btw(pi: ExtensionAPI) {
   let finish: ((action: ViewAction) => void) | undefined;
   let summaryAbort: AbortController | undefined;
   let menu: "merge" | "close" | undefined;
+  let mergeTarget: "main" | "source" = "main";
   let manifest: string | undefined;
   let persistenceReady = true;
   let uiContext: ExtensionContext | undefined;
@@ -94,9 +95,9 @@ export default function btw(pi: ExtensionAPI) {
   async function command(args: string, ctx: ExtensionContext) {
     const [verb,...rest] = args.trim().split(/\s+/);
     if (verb === "list") {
-      const choices = ["main", ...[...workspace.tabs.values()].map(tab =>
-        `BTW ${tab.id} · source ${tab.source || "main"} · ${tab.child.session.closed ? "closed" : tab.child.session.dormant ? "saved" : tab.child.session.isStreaming ? "running" : "idle"}`)];
-      const ids = [0, ...workspace.tabs.keys()];
+      const rows = workspace.listRows();
+      const choices = rows.map(row => row.label);
+      const ids = rows.map(row => row.id);
       const choice = await ctx.ui.select("BTW sessions", choices);
       if (choice !== undefined) {
         const index = choices.indexOf(choice);
@@ -108,8 +109,10 @@ export default function btw(pi: ExtensionAPI) {
     if (verb === "close") { if (merging || creating) throw new Error("BTW operation in progress"); selected(); menu = "close"; return; }
     if (verb === "merge") {
       const tab = selected();
-      if (!rest.length) { menu = "merge"; return; }
-      const [target,mode] = rest.length === 1 ? ["source",rest[0]] : rest;
+      if (!rest.length || (rest.length === 1 && ["source","main"].includes(rest[0]))) {
+        mergeTarget = rest[0] === "source" ? "source" : "main"; menu = "merge"; return;
+      }
+      const [target,mode] = rest.length === 1 ? ["main",rest[0]] : rest;
       if (rest.length > 2 || (target !== "source" && target !== "main") || !["full","summary"].includes(mode))
         throw new Error("Use /btw merge [source|main] full|summary");
       await merge(tab,target,mode,ctx); return;
@@ -142,7 +145,7 @@ export default function btw(pi: ExtensionAPI) {
             if (merging) throw new Error("Summary/merge in progress");
             await tab.child.session.prompt(text);
           });
-          if (menu === "merge") view.showMerge();
+          if (menu === "merge") view.showMerge(mergeTarget);
           if (menu === "close") view.showClose();
           menu = undefined;
           return view;

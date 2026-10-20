@@ -98,13 +98,13 @@ test('extension merges only explicitly, queues follow-up, prevents duplicates, a
   assert.match(notices.at(-1).message, /already been merged/);
   await command('second question');
   await new Promise(r => setTimeout(r, 500));
-  await command('merge main summary');
+  await command('merge summary');
   assert.equal(sent.length, 2, JSON.stringify(notices));
   assert.match(sent[1].message.content, /merged summary/);
   assert.match(summaryRaw, /second question/);
   ctx.ui.select=async (title,choices)=>{
     assert.equal(title,'BTW sessions');
-    assert.deepEqual(choices,['main','BTW 1 · source main · idle','BTW 2 · source 1 · idle']);
+    assert.deepEqual(choices,['main','└─ BTW 1 · source main · idle','   └─ BTW 2 · source 1 · idle']);
     return choices[0];
   };
   await command('list');

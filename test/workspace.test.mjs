@@ -13,6 +13,18 @@ test('creation-order cycling includes main; closing source preserves descendants
   w.current=a.id;w.close(a.id);assert.equal(w.current,0);assert.ok(w.tabs.has(b.id));assert.equal(disposed,1);
   assert.throws(()=>w.destination(b,'source'),/Source BTW is closed/);
   assert.equal(w.destination(b,'main'),0);
+  assert.match(w.listRows().find(row=>row.id===b.id).label,/source 1 \(closed\)/);
   const d=w.add(child());assert.ok(d.id>c.id);
   w.dispose();assert.equal(disposed,4);assert.equal(w.current,0);
+});
+
+test('list is a source tree rather than creation order and preserves ID selection',()=>{
+  const w=new Workspace();
+  const child=()=>({session:{dispose(){},closed:false,dormant:false,isStreaming:false}});
+  const a=w.add(child(),0),b=w.add(child(),0),c=w.add(child(),a.id),d=w.add(child(),c.id);
+  assert.deepEqual(w.listRows().map(row=>row.id),[0,a.id,c.id,d.id,b.id]);
+  assert.match(w.listRows()[1].label,/^├─ BTW 1/);
+  assert.match(w.listRows()[2].label,/^│  └─ BTW 3/);
+  assert.match(w.listRows()[3].label,/^│     └─ BTW 4/);
+  assert.match(w.listRows()[4].label,/^└─ BTW 2/);
 });

@@ -24,6 +24,25 @@ export class Workspace {
     const index = Math.max(0, ids.indexOf(this.current));
     return this.current = ids[(index + direction + ids.length) % ids.length];
   }
+  listRows() {
+    const rows = [{id:0,label:"main"}];
+    const visited = new Set<number>();
+    const walk = (tabs: Tab[], prefix: string) => {
+      tabs.forEach((tab,index) => {
+        if (visited.has(tab.id)) return;
+        visited.add(tab.id);
+        const last = index === tabs.length - 1;
+        const status = tab.child.session.closed ? "closed" : tab.child.session.dormant ? "saved" : tab.child.session.isStreaming ? "running" : "idle";
+        const source = tab.source || "main";
+        rows.push({id:tab.id,label:`${prefix}${last ? "└─" : "├─"} BTW ${tab.id} · source ${source}${tab.source && !this.tabs.has(tab.source) ? " (closed)" : ""} · ${status}`});
+        walk([...this.tabs.values()].filter(child => child.source === tab.id && !visited.has(child.id)),prefix + (last ? "   " : "│  "));
+      });
+    };
+    walk([...this.tabs.values()].filter(tab => !tab.source || !this.tabs.has(tab.source)),"");
+    // Corrupt/legacy cycles must not hide sessions or recurse forever.
+    walk([...this.tabs.values()].filter(tab => !visited.has(tab.id)),"");
+    return rows;
+  }
   destination(tab: Tab, target: "source" | "main") {
     const id = target === "main" ? 0 : tab.source;
     if (id && (!this.tabs.has(id) || this.tabs.get(id)!.child.session.closed))
