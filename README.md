@@ -42,14 +42,18 @@ pi -e /path/to/pi-btw/src/index.ts
 /btw prev
 /btw merge
 /btw merge source
-/btw merge source full
-/btw merge source summary
-/btw merge main full
-/btw merge main summary
+/btw merge main
 /btw close
 ```
 
-`/btw merge` 默认目标为 main，弹出原文/summary 选择；`/btw merge full|summary` 也默认合并到 main。只有显式 `/btw merge source [full|summary]` 才合并到直接来源。不提供 `/merge` 或 `/main` 命令。主界面要合并/关闭已有 BTW，请先切换到它。
+`/btw merge` 默认目标为 main；只有显式 `/btw merge source` 才合并到直接来源。每次合并都要求用户选择模式，取消不会注入任何内容，不再支持直接在命令中指定 `full`/`summary` 绕过选择。
+
+| 模式 | 内容 |
+| --- | --- |
+| summary | 仅原生 tree 摘要 |
+| conversation | 用户/助手对话正文、图片及可见 custom 消息；不含 thinking、工具调用与结果 |
+| summary with conversation | 摘要＋上述 conversation |
+| full conversation with thinking and toolcall | 完整原文，含保存的 thinking、工具调用及结果 |不提供 `/merge` 或 `/main` 命令。主界面要合并/关闭已有 BTW，请先切换到它。
 
 `source` 是直接来源；`main` 是最初主会话。关闭只结束当前 BTW，不关闭其后代。source 已关闭时，合并到 source 明确报错，仍可合并到 main。关闭保留 session 文件。
 
@@ -71,7 +75,7 @@ SDK 子进程显式初始化 Pi 的 HTTP 代理及超时配置，支持环境变
 
 运行中也可以 fork。未完成工具在子会话内补明确的快照边界错误结果，不重放、不取消源工具；未完成流式响应作为观察记录附加到子会话。
 
-`full` 包含 fork 后当前分支的完整原文 JSONL，不截断，保留新增消息、工具结果、图片原始数据及摘要记录，不重复包含 fork 前历史。`summary` 复用 Pi `/tree` 的 `generateBranchSummary()`，使用原生 prompt、预算和文件清单策略；原生摘要预处理省略工具结果，并可能按预算舍弃较旧消息。摘要失败或取消不合并。
+完整模式包含 fork 后当前分支的完整原文 JSONL，不截断，保留新增消息、工具结果、图片原始数据及摘要记录，不重复包含 fork 前历史。conversation 使用过滤后的 JSONL 保存正文与图片，不额外请求模型。两种带 summary 的模式复用 Pi `/tree` 的 `generateBranchSummary()`，使用原生 prompt、预算和文件清单策略；原生摘要预处理省略工具结果，并可能按预算舍弃较旧消息。摘要失败或取消不合并。
 
 合并以可见 custom message 发送，使用 follow-up 排队，不中断目标任务。每个目标分别防止同一 revision 重复合并；后续合并包含 fork 后全部对话，而非增量。合并后不关闭 BTW。
 

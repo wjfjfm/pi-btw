@@ -3,7 +3,7 @@ import { AssistantMessageComponent, UserMessageComponent, CustomMessageComponent
 import { Editor, Text, matchesKey, truncateToWidth, wrapTextWithAnsi, type Component, type TUI } from "@earendil-works/pi-tui";
 import type { Tab } from "./workspace.js";
 
-export type ViewAction = { kind: "next" | "prev" | "main" | "new" | "close" | "merge" | "command"; text?: string };
+export type ViewAction = { kind: "next" | "prev" | "main" | "new" | "close" | "command"; text?: string };
 export const HELP = "Ctrl+B prev · Ctrl+F next · Esc main | /btw · /btw list · /btw merge · /btw close";
 
 /** Pi's native message components, bounded to the overlay viewport. */
@@ -12,8 +12,7 @@ export class BtwView {
   private unsubscribe: () => void;
   private offset = 0;
   private error = "";
-  private menu?: "mode" | "close";
-  private destination = "main";
+  private menu?: "close";
   private cache?: { width: number; lines: string[] };
   private history?: { width: number; messages: Tab["child"]["session"]["messages"]; lines: string[] };
   constructor(private tui: TUI, private theme: Theme, private tab: Tab,
@@ -24,7 +23,7 @@ export class BtwView {
       if (!text.trim()) return;
       this.editor.setText(""); this.offset = 0; this.error = ""; this.tab.notice = undefined;
       if (text === "/btw" || text.startsWith("/btw ")) { this.action({kind:"command",text:text.slice(4).trim()}); return; }
-      if (text === "/main" || text.startsWith("/merge")) { this.error = "Use the shortcuts below or /btw merge source|main full|summary"; return; }
+      if (text === "/main" || text.startsWith("/merge")) { this.error = "Use the shortcuts below or /btw merge [source|main]"; return; }
       void this.submit(text).catch(error => { this.error = String(error); if (!this.editor.getText()) this.editor.setText(text); })
         .finally(() => { this.invalidate(); tui.requestRender(); });
     };
@@ -36,13 +35,11 @@ export class BtwView {
   invalidate() { this.cache = undefined; this.history = undefined; this.editor.invalidate(); }
   saveDraft() { this.tab.draft = this.editor.getText(); }
   dispose() { this.saveDraft(); this.unsubscribe(); }
-  showMerge(target: "main" | "source" = "main") { this.destination = target; this.menu = "mode"; this.tui.requestRender(); }
   showClose() { this.menu = "close"; this.tui.requestRender(); }
   handleInput(data: string) {
     if (this.menu) {
       if (matchesKey(data,"escape") || data === "n") this.menu = undefined;
       else if (this.menu === "close" && data === "y") this.action({kind:"close"});
-      else if (this.menu === "mode" && (data === "f" || data === "s")) this.action({kind:"command",text:`merge ${this.destination} ${data === "f" ? "full" : "summary"}`});
       this.tui.requestRender(); return;
     }
     for (const [key,kind] of [["ctrl+b","prev"],["ctrl+f","next"],["escape","main"]] as const)
@@ -91,8 +88,7 @@ export class BtwView {
   render(width: number): string[] {
     const height = Math.max(4,this.tui.terminal.rows);
     const session = this.tab.child.session;
-    const hint = this.menu === "mode" ? `Merge to ${this.destination}: [f] full  [s] summary  [Esc] cancel`
-      : this.menu === "close" ? "Close this BTW? Background execution will stop. [y] yes  [n/Esc] cancel"
+    const hint = this.menu === "close" ? "Close this BTW? Background execution will stop. [y] yes  [n/Esc] cancel"
       : this.error || session.error || this.tab.notice || "";
     const footer = wrapTextWithAnsi(hint ? `${hint}\n${HELP}` : HELP,Math.max(1,width)).slice(0,Math.max(1,Math.floor(height/3)));
     const editor = this.editor.render(width).slice(-(height-footer.length-1));

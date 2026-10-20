@@ -75,12 +75,16 @@ test('extension merges only explicitly, queues follow-up, prevents duplicates, a
     getCommands:() => [{source:'extension',sourceInfo:{path:capture.extensionPaths[0]}}],
     sendMessage:(message, options) => sent.push({message,options}),
   };
-  let summaryRaw;
+  let summaryRaw, selection;
+  const choose=async (_title,choices)=>{
+    assert.deepEqual(choices,['summary','conversation','summary with conversation','full conversation with thinking and toolcall']);
+    return selection;
+  };
   const ctx = {
     mode:'tui', cwd:capture.cwd, model, thinkingLevel:'off', scopedModels:[], sessionManager:parent,
     getSystemPrompt:() => capture.systemPrompt, isProjectTrusted:() => true,
     modelRegistry:{streamSimple:(_model, context) => {summaryRaw=JSON.stringify(context.messages);const stream=createAssistantMessageEventStream();stream.push({type:'done',reason:'stop',message:{stopReason:'stop',content:[{type:'text',text:'merged summary'}]}});stream.end();return stream;}},
-    ui:{custom:async () => {}, notify:(message,type) => notices.push({message,type})},
+    ui:{select:choose, custom:async () => {}, notify:(message,type) => notices.push({message,type})},
   };
   btw(pi); handlers.get('session_start')({}, ctx);
   t.after(() => handlers.get('session_shutdown')());
@@ -88,17 +92,21 @@ test('extension merges only explicitly, queues follow-up, prevents duplicates, a
   assert.equal(sent.length, 0);
   await command('first question');
   await new Promise(r => setTimeout(r, 500));
-  await command('merge full');
+  await command('merge');
+  assert.equal(sent.length,0,'cancelling must not merge');
+  selection='full conversation with thinking and toolcall';
+  await command('merge');
   assert.equal(sent.length, 1, JSON.stringify(notices));
   assert.match(sent[0].message.content, /first question/);
   assert.equal(sent[0].options.deliverAs, 'followUp');
   assert.equal(sent[0].options.triggerTurn, true);
-  await command('merge full');
+  await command('merge');
   assert.equal(sent.length, 1);
   assert.match(notices.at(-1).message, /already been merged/);
   await command('second question');
   await new Promise(r => setTimeout(r, 500));
-  await command('merge summary');
+  selection='summary';
+  await command('merge');
   assert.equal(sent.length, 2, JSON.stringify(notices));
   assert.match(sent[1].message.content, /merged summary/);
   assert.match(summaryRaw, /second question/);
@@ -108,16 +116,18 @@ test('extension merges only explicitly, queues follow-up, prevents duplicates, a
     return choices[0];
   };
   await command('list');
-  await command('merge full');
+  await command('merge');
   assert.match(notices.at(-1).message,/Select a BTW/);
   ctx.ui.select=async (_title,choices)=>choices[1];
   await command('list');
-  await command('merge full');
+  ctx.ui.select=choose;
+  await command('merge');
   assert.match(notices.at(-1).message,/already been merged/);
   ctx.ui.select=async()=>undefined;
   await command('list');
-  await command('merge full');
-  assert.match(notices.at(-1).message,/already been merged/);
+  const count=sent.length;
+  await command('merge');
+  assert.equal(sent.length,count);
   await command('close');
 });
 

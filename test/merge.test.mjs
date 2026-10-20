@@ -34,8 +34,27 @@ test('summary uses native tree prompt, budget and abort signal', async () => {
 for (const reason of ['error','aborted','length']) test('failed summary is not merged: '+reason, async () => {
   await assert.rejects(mergeContent(raw,'summary',context(reason)), /failure|aborted|length|truncat|complete/i);
 });
+test('four modes distinguish dialogue, summary and full reasoning/tool transcript', async()=>{
+  const entries=[
+    {type:'message',message:{role:'user',content:[{type:'text',text:'question'},{type:'image',mimeType:'image/png',data:'IMAGE_BASE64'}]}},
+    {type:'message',message:{role:'assistant',content:[{type:'thinking',thinking:'PRIVATE_REASONING'},{type:'text',text:'answer'},{type:'toolCall',id:'call',name:'bash',arguments:{command:'TOOL_ARGUMENTS'}}]}},
+    {type:'message',message:{role:'toolResult',toolCallId:'call',toolName:'bash',content:[{type:'text',text:'TOOL_RESULT'}]}},
+    {type:'custom_message',customType:'note',display:true,content:'visible note'},
+    {type:'custom_message',customType:'hidden',display:false,content:'HIDDEN_NOTE'},
+  ].map((entry,i)=>({...entry,id:String(i),parentId:i?String(i-1):null,timestamp:new Date().toISOString()}));
+  const transcript=entries.map(e=>JSON.stringify(e)).join('\n');
+  const dialogue=await mergeContent(transcript,'conversation',{});
+  assert.match(dialogue,/question/);assert.match(dialogue,/answer/);assert.match(dialogue,/visible note/);assert.match(dialogue,/IMAGE_BASE64/);
+  assert.doesNotMatch(dialogue,/PRIVATE_REASONING|TOOL_ARGUMENTS|TOOL_RESULT|HIDDEN_NOTE|toolCall/);
+  assert.equal(await mergeContent(transcript,'full',{}),transcript);
+  const combined=await mergeContent(transcript,'summary-with-conversation',context('stop','SUMMARIZED'));
+  assert.match(combined,/## Summary[\s\S]*SUMMARIZED[\s\S]*## Conversation/);
+  assert.ok(combined.endsWith(dialogue));
+  const summary=await mergeContent(transcript,'summary',context('stop','SUMMARIZED'));
+  assert.match(summary,/SUMMARIZED/);assert.doesNotMatch(summary,/IMAGE_BASE64|## Conversation/);
+});
 test('empty summary and invalid merge requests are rejected', async () => {
   await assert.rejects(mergeContent(raw, 'summary', context('stop','')), /Empty summary/);
   await assert.rejects(mergeContent('', 'full', {}), /No BTW/);
-  await assert.rejects(mergeContent(raw, 'other', {}), /full\|summary/);
+  await assert.rejects(mergeContent(raw, 'other', {}), /Invalid merge mode/);
 });
