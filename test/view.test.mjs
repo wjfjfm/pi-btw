@@ -25,6 +25,18 @@ test('native view fits terminal, preserves draft, and switches without cancellin
   f.view.handleInput('\x03');assert.equal(f.counts().aborted,1);
   f.view.dispose();assert.equal(f.counts().disposed,1);
 });
+test('normal footer content is retained and current BTW identity is explicit',()=>{
+  const f=fixture();
+  f.session.footer=()=>['/workspace (main)','↑1k ↓200 12%/100k     my-model','Goal paused'];
+  const lines=f.view.render(120);
+  assert.equal(lines.length,24);
+  const rendered=lines.join('\n');
+  assert.match(rendered,/\/workspace \(main\)/);
+  assert.match(rendered,/↑1k ↓200 12%\/100k     my-model/);
+  assert.match(rendered,/Goal paused/);
+  assert.match(rendered,/当前会话：BTW 2 · 来源：BTW 1/);
+  f.view.dispose();
+});
 test('native assistant displays fetch errors even without text, and renders streamed/final replies',()=>{
   const f=fixture([assistant([],{stopReason:'error',errorMessage:'fetch failed'})]);
   assert.match(f.view.render(100).join('\n'),/fetch failed/);

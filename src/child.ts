@@ -23,6 +23,20 @@ export class ChildSession {
   partial: AgentSession["messages"][number] | undefined;
   error = "";
   get closed() { return this.dead; }
+  private footerRevision = 0;
+  private footerKey = "";
+  private footerLines: string[] = [];
+  private footerPending = false;
+  footer(width: number, theme?: string): string[] {
+    const key = `${width}:${theme}:${this.footerRevision}`;
+    if (!this.dead && !this.dormant && !this.footerPending && key !== this.footerKey) {
+      this.footerPending = true; this.footerKey = key;
+      void this.request("footer",{width,theme}).then(lines => { this.footerLines = lines; })
+        .catch(error => { this.error = String(error); })
+        .finally(() => { this.footerPending = false; this.changed(); });
+    }
+    return this.footerLines;
+  }
   private observers = new Set<() => void>();
   observe(listener: () => void) { this.observers.add(listener); return () => { this.observers.delete(listener); }; }
   private changed() { for (const listener of this.observers) listener(); }
@@ -54,6 +68,7 @@ export class ChildSession {
         if (message.error) { this.error = message.error; pending?.reject(new Error(message.error)); }
         else pending?.resolve(message.value);
       } else {
+        if (message.messages || message.type === "footer_dirty" || message.event?.type === "model_select") this.footerRevision++;
         if (message.messages) this.messages = message.messages;
         if (typeof message.streaming === "boolean") this.remoteStreaming = message.streaming;
         if (message.type === "event") {

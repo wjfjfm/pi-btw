@@ -6,7 +6,7 @@ import type { Tab } from "./workspace.js";
 export type ViewAction = { kind: "next" | "prev" | "main" | "new" | "close" | "command"; text?: string };
 export const HELP = "Ctrl+B prev · Ctrl+F next · Esc main | /btw · /btw list · /btw merge · /btw close";
 
-/** Pi's native message components, bounded to the overlay viewport. */
+/** Pi's native message components and child footer in a full-screen viewport. */
 export class BtwView {
   private editor: Editor;
   private unsubscribe: () => void;
@@ -88,11 +88,14 @@ export class BtwView {
   render(width: number): string[] {
     const height = Math.max(4,this.tui.terminal.rows);
     const session = this.tab.child.session;
+    const status = [...(session.footer?.(width,this.theme.name) ?? []),
+      this.theme.fg("accent",`当前会话：BTW ${this.tab.id} · 来源：${this.tab.source ? `BTW ${this.tab.source}` : "main"}`)]
+      .slice(0,Math.max(0,height-5));
     const hint = this.menu === "close" ? "Close this BTW? Background execution will stop. [y] yes  [n/Esc] cancel"
       : this.error || session.error || this.tab.notice || "";
-    const footer = wrapTextWithAnsi(hint ? `${hint}\n${HELP}` : HELP,Math.max(1,width)).slice(0,Math.max(1,Math.floor(height/3)));
-    const editor = this.editor.render(width).slice(-(height-footer.length-1));
-    const room = Math.max(0,height-editor.length-footer.length-1);
+    const footer = wrapTextWithAnsi(hint ? `${hint}\n${HELP}` : HELP,Math.max(1,width)).slice(0,Math.max(1,Math.min(Math.floor(height/3),height-status.length-3)));
+    const editor = this.editor.render(width).slice(-(height-footer.length-status.length-1));
+    const room = Math.max(0,height-editor.length-footer.length-status.length-1);
     if (!this.cache || this.cache.width !== width) {
       if (!this.history || this.history.width !== width || this.history.messages !== session.messages)
         this.history = {width,messages:session.messages,lines:this.transcript(width,session.messages)};
@@ -103,7 +106,7 @@ export class BtwView {
     const end = lines.length-this.offset;
     const body = lines.slice(Math.max(0,end-room),end);
     while (body.length < room) body.push("");
-    return [this.theme.fg("accent",`BTW ${this.tab.id} · source ${this.tab.source || "main"} · ${session.closed ? "closed" : session.isStreaming ? "running" : "idle"}`),
-      ...body,...footer,...editor].map(line => truncateToWidth(line,width));
+    return [this.theme.fg("accent",`当前：BTW ${this.tab.id} · 来源：${this.tab.source ? `BTW ${this.tab.source}` : "main"} · ${session.closed ? "closed" : session.isStreaming ? "running" : "idle"}`),
+      ...body,...footer,...editor,...status].map(line => truncateToWidth(line,width));
   }
 }

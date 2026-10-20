@@ -19,6 +19,7 @@ async function fixture(t) {
   await writeFile(extension, `import { createAssistantMessageEventStream } from '@earendil-works/pi-ai';
 export default function(pi) {
   globalThis.__BTW_CHILD_SENTINEL = true;
+  pi.on('session_start',(_event,ctx)=>ctx.ui.setStatus('qa','KEEP_EXISTING_STATUS'));
   pi.registerProvider('btw-test', {apiKey:'dummy',api:'openai-completions',baseUrl:'http://unused.invalid',models:[${JSON.stringify(model)}],
     streamSimple: (_model, context) => {
       const stream = createAssistantMessageEventStream();
@@ -51,6 +52,11 @@ test('independent SDK process inherits history/system/tools and does not mutate 
   await running;
   assert.equal(child.session.isStreaming, false);
   assert.ok(events.includes('message_end'));
+  const footer=await child.session.request('footer',{width:120,theme:'dark'});
+  assert.match(footer.join('\n'),/btw-test/);
+  assert.match(footer.join('\n'),/KEEP_EXISTING_STATUS/);
+  assert.match(footer.join('\n'),/100k/);
+  assert.match(footer.join('\n'),/pi-btw-worker-/);
   const raw = await readFile(child.manager.getSessionFile(), 'utf8');
   assert.match(raw, /child reply/);
   assert.match(raw, /parent context/);
