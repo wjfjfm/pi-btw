@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { SessionManager } from '@earendil-works/pi-coding-agent';
 import { forkSnapshot, rawConversation } from '../dist/snapshot.js';
 
@@ -34,6 +34,26 @@ test('native fork preserves projection, edits, labels and custom state without m
   parent.appendMessage(user('parent only'));
   assert.doesNotMatch(JSON.stringify(parent.getEntries()), /child only/);
   assert.doesNotMatch(JSON.stringify(fork.manager.getEntries()), /parent only/);
+});
+
+test('continue and resume exclude newer BTW sessions, including nested forks', async t => {
+  const {cwd,parent}=setup(t);
+  parent.appendMessage(user('main'));
+  parent.appendMessage(assistant([{type:'text',text:'main reply'}]));
+  const before=readFileSync(parent.getSessionFile(),'utf8');
+  const child=forkSnapshot(parent,cwd);
+  child.manager.appendMessage(user('BTW'));
+  const nested=forkSnapshot(child.manager,cwd);
+  const dir=parent.getSessionDir();
+  assert.equal(dirname(child.manager.getSessionFile()),join(dir,'btw-sessions'));
+  assert.equal(dirname(nested.manager.getSessionFile()),join(dir,'btw-sessions'));
+  const future=new Date(Date.now()+60000);
+  for(const fork of [child,nested]) utimesSync(fork.manager.getSessionFile(),future,future);
+  assert.equal(SessionManager.continueRecent(cwd,dir).getSessionId(),parent.getSessionId());
+  const listed=await SessionManager.list(cwd,dir);
+  assert.deepEqual(listed.map(s=>s.id),[parent.getSessionId()]);
+  assert.equal(SessionManager.open(nested.manager.getSessionFile()).getSessionId(),nested.manager.getSessionId());
+  assert.equal(readFileSync(parent.getSessionFile(),'utf8'),before);
 });
 
 test('compaction and branch selection are inherited, abandoned branch is excluded', t => {

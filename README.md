@@ -63,6 +63,10 @@ pi -e /path/to/pi-btw/src/index.ts
 
 ## 持久化
 
+新建 BTW 的对话文件放在会话目录的 `btw-sessions/` 子目录，嵌套 BTW 复用该目录，不参与 Pi 原生 `--continue` 和 `/resume` 的顶层会话发现。BTW 仍通过 `/btw list` 恢复，也可用 `pi --session <完整路径>` 单独打开。
+
+旧版放在顶层的 BTW 文件不会自动搬动，避免破坏仍在写入的进程和已有工作区引用。因此旧文件仍可能被 `--continue` 选中；迁移前请使用 `pi --session <主会话完整路径>`，不要把 `/reload` 当作旧文件迁移。
+
 BTW 列表按主 session 保存。重新打开同一主会话或 `/reload` 后，`/btw list` 恢复列表、source 关系、已保存草稿与合并去重记录。恢复的条目标记为 `saved`；切换到它时才启动子进程，沿用原 session 文件，不自动发送提示或续跑中断任务。未完成工具不会重放。
 
 列表以权限 `0600` 原子写入主 session 目录下的 `btw-workspaces/<主session-id>.json`，包含恢复所需配置，不进入模型上下文。草稿在切换或正常退出时保存。主会话使用 `--no-session` 时不保存列表；`/btw close` 从列表移除该项，但仍保留子会话文件。新功能不自动导入旧版本未登记的 BTW 文件。

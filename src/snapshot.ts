@@ -1,5 +1,5 @@
 import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { SessionManager, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 type ReadonlySessionManager = ExtensionContext["sessionManager"];
 
@@ -33,8 +33,11 @@ export function forkSnapshot(source: ReadonlySessionManager, cwd: string, partia
     parentId: source.getSessionId(), parentFile: source.getSessionFile(),
     parentLeaf: leaf, createdAt: Date.now(),
   };
-  const dir = directory ?? (source.getSessionDir() || SessionManager.create(cwd).getSessionDir());
-  mkdirSync(dir, { recursive: true });
+  // Native --continue and /resume discover top-level JSONL files. Keep BTW
+  // outside that namespace, including forks made from another BTW worker.
+  const sourceDir = source.getSessionDir() || SessionManager.create(cwd).getSessionDir();
+  const dir = directory ?? (basename(sourceDir) === "btw-sessions" ? sourceDir : join(sourceDir, "btw-sessions"));
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
   const file = join(dir, `${new Date().toISOString().replace(/[:.]/g, "-")}_${forkHeader.id}.jsonl`);
   writeFileSync(file, [ { ...forkHeader, parentSession: origin.parentFile }, ...detached.getEntries() ]
     .map(entry => JSON.stringify(entry)).join("\n") + "\n", { flag: "wx", mode: 0o600 });
