@@ -2,7 +2,15 @@ import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {SessionManager} from '@earendil-works/pi-coding-agent';
 import {visibleWidth} from '@earendil-works/pi-tui';
-import {sessionPreview} from '../dist/preview.js';
+import {sessionPreview,inlinePreview} from '../dist/preview.js';
+
+test('inline preview is a single dimmed suffix without first/last labels',()=>{
+  const dim=text=>`\x1b[90m${text}\x1b[39m`;
+  const text=inlinePreview(['首：first question','末：latest reply'],dim);
+  assert.equal(text,'  \x1b[90mfirst question … latest reply\x1b[39m');
+  assert.doesNotMatch(text,/\n|首：|末：/);
+  assert.equal(inlinePreview(['首：same','末：same']),'  same');
+});
 
 const user=text=>({role:'user',content:text,timestamp:1});
 test('preview contains first and latest own dialogue, not inherited history, reasoning or tools',()=>{

@@ -124,9 +124,11 @@ test('extension merges only explicitly, queues follow-up, prevents duplicates, a
   assert.match(summaryRaw, /second question/);
   ctx.ui.select=async (title,choices)=>{
     assert.equal(title,'BTW sessions');
-    assert.deepEqual(choices.map(choice=>choice.split('\n')[0]),['main','└─ BTW 1 · source main · idle','   └─ BTW 2 · source 1 · idle','Merge…']);
-    assert.match(choices[1],/首：first question/);assert.match(choices[1],/末：child reply/);
-    assert.match(choices[2],/首：second question/);
+    assert.equal(choices.length,4);
+    ['main','└─ BTW 1 · source main · idle','   └─ BTW 2 · source 1 · idle','Merge…'].forEach((prefix,i)=>assert.ok(choices[i].startsWith(prefix)));
+    assert.match(choices[1],/first question/);assert.match(choices[1],/child reply/);
+    assert.match(choices[2],/second question/);
+    for(const choice of choices)assert.doesNotMatch(choice,/\n|首：|末：/);
     return choices[0];
   };
   await command('list');

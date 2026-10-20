@@ -23,6 +23,11 @@ export function sessionPreview(manager: ReadonlyManager, boundary?: string): str
   }
   return first ? [`首：${first}`,`末：${last}`] : ["暂无新对话"];
 }
+export function inlinePreview(lines: string[], dim: (text: string) => string = text => text) {
+  const snippets = [...new Set(lines.map(line => line.replace(/^[首末]：/,"")))];
+  const text = snippets.map(line => stripVTControlCharacters(truncateToWidth(line,24))).join(" … ");
+  return text ? `  ${dim(text)}` : "";
+}
 export function childPreview(child: Child): string[] {
   const file = child.manager?.getSessionFile();
   if (!file) return [];
