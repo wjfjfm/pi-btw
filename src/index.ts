@@ -2,6 +2,7 @@ import { SessionManager, type ExtensionAPI, type ExtensionContext } from "@earen
 import { captureChild, startChild } from "./child.js";
 import { rawConversation } from "./snapshot.js";
 import { BtwView, type ViewAction } from "./view.js";
+import { ListDialog, type ListAction } from "./list-dialog.js";
 import { MERGE_MODES, mergeContent } from "./merge.js";
 import { MergeDialog, mergeMode, type MergeOptions } from "./merge-dialog.js";
 import { Workspace, type Tab } from "./workspace.js";
@@ -116,26 +117,16 @@ export default function btw(pi: ExtensionAPI) {
     const [verb,...rest] = args.trim().split(/\s+/);
     if (verb === "list") {
       const rows = workspace.listRows(ctx.sessionManager,text => ctx.ui.theme?.fg("dim",text) ?? text);
-      const choices = [...rows.map(row => row.label),"Merge…"];
-      const ids = rows.map(row => row.id);
       const version = generation;
-      const choice = await ctx.ui.select("BTW sessions", choices);
-      if (version !== generation) return;
-      if (choice === "Merge…") {
-        const sources = rows.filter(row => row.id && !workspace.tabs.get(row.id)!.child.session.closed);
-        if (!sources.length) throw new Error("No BTW sessions to merge");
-        const from = await ctx.ui.select("Merge from",sources.map(row => row.label));
-        const sourceId = sources.find(row => row.label === from)?.id;
-        if (sourceId === undefined || version !== generation) return;
-        const tab = workspace.tabs.get(sourceId);
+      const choice = await ctx.ui.custom<ListAction | undefined>((tui,theme,_keys,done) =>
+        new ListDialog(tui,theme,rows.map(row => ({...row,
+          mergeable:!!row.id && !workspace.tabs.get(row.id)!.child.session.closed})),workspace.current,done));
+      if (!choice || version !== generation) return;
+      if (choice.kind === "merge") {
+        const tab = workspace.tabs.get(choice.id);
         if (!tab) throw new Error("Source BTW is closed");
         await chooseMerge(tab,0,ctx);
-        return;
-      }
-      if (choice !== undefined) {
-        const index = choices.indexOf(choice);
-        if (index >= 0) workspace.current = ids[index];
-      }
+      } else if (!choice.id || workspace.tabs.has(choice.id)) workspace.current = choice.id;
       return;
     }
     if (verb === "next" || verb === "prev") { workspace.move(verb === "next" ? 1 : -1); return; }

@@ -2,6 +2,7 @@ import { AssistantMessageComponent, UserMessageComponent, CustomMessageComponent
   getSelectListTheme, type Theme } from "@earendil-works/pi-coding-agent";
 import { Editor, Text, matchesKey, truncateToWidth, wrapTextWithAnsi, type Component, type TUI } from "@earendil-works/pi-tui";
 import type { Tab } from "./workspace.js";
+import { childPreview, inlinePreview } from "./preview.js";
 
 export type ViewAction = { kind: "next" | "prev" | "main" | "new" | "close" | "command"; text?: string };
 export const HELP = "Ctrl+B prev · Ctrl+F next · Esc main | /btw · /btw list · /btw merge · /btw close";
@@ -11,6 +12,7 @@ export class BtwView {
   private editor: Editor;
   private unsubscribe: () => void;
   private offset = 0;
+  private preview?: { messages: Tab["child"]["session"]["messages"]; lines: string[] };
   private error = "";
   private menu?: "close";
   private cache?: { width: number; lines: string[] };
@@ -88,8 +90,11 @@ export class BtwView {
   render(width: number): string[] {
     const height = Math.max(4,this.tui.terminal.rows);
     const session = this.tab.child.session;
+    if (!this.preview || this.preview.messages !== session.messages)
+      this.preview = {messages:session.messages,lines:childPreview(this.tab.child)};
     const status = [...(session.footer?.(width,this.theme.name) ?? []),
-      this.theme.fg("accent",`当前会话：BTW ${this.tab.id} · 来源：${this.tab.source ? `BTW ${this.tab.source}` : "main"}`)]
+      this.theme.fg("accent",`当前会话：BTW ${this.tab.id} · 来源：${this.tab.source ? `BTW ${this.tab.source}` : "main"}`)
+        + inlinePreview(this.preview.lines,text => this.theme.fg("dim",text))]
       .slice(0,Math.max(0,height-5));
     const hint = this.menu === "close" ? "Close this BTW? Background execution will stop. [y] yes  [n/Esc] cancel"
       : this.error || session.error || this.tab.notice || "";

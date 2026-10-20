@@ -36,7 +36,7 @@ pi -e /path/to/pi-btw/src/index.ts
 
 会话列表及 merge 的来源/目标列表，在会话信息同一行后方，以暗色显示“第一条 … 最新一条”正文预览，不添加首/末标签。BTW 只取派生后的对话，不混入继承历史；不显示 thinking 或工具输出，不调用模型。长内容截短显示，原始对话不变。
 
-列表末尾的 `Merge…`：选择要合并的 BTW 后，进入与 `/btw merge` 相同的选项弹窗。目标可选 main 或其他可用 BTW，不包括自身。任一步取消都不合并。
+在 `/btw list` 中用 ↑↓ 高亮要合并的 BTW，按 **m** 进入与 `/btw merge` 相同的选项弹窗；Enter 切换会话，Esc 取消。列表默认高亮当前会话，不再提供 `Merge…` 条目或额外来源选择。目标可选 main 或其他可用 BTW，不包括自身。任一步取消都不合并。
 
 在当前 BTW 中也可使用：
 
@@ -68,7 +68,7 @@ Conversation:       Strip
 - **Conversation**：Full 保留完整原文（含 thinking、工具调用与结果）；Strip 仅保留用户/助手正文、图片及可见 custom 消息；None 不附对话。
 - Summary No + Conversation None 没有可合并内容，弹窗会阻止确认。取消、摘要失败或投递失败均不关闭源 BTW。
 
-不提供 `/merge` 或 `/main` 命令。主界面可通过 `/btw list → Merge…` 合并已有 BTW。
+不提供 `/merge` 或 `/main` 命令。主界面可通过 `/btw list → 高亮 BTW → m` 合并已有 BTW。
 
 `source` 是直接来源；`main` 是最初主会话。关闭只结束当前 BTW，不关闭其后代。source 已关闭时，合并到 source 明确报错，仍可合并到 main。关闭保留 session 文件。
 
@@ -83,6 +83,8 @@ BTW 列表按主 session 保存。重新打开同一主会话或 `/reload` 后�
 列表以权限 `0600` 原子写入主 session 目录下的 `btw-workspaces/<主session-id>.json`，包含恢复所需配置，不进入模型上下文。草稿在切换或正常退出时保存。主会话使用 `--no-session` 时不保存列表；`/btw close` 从列表移除该项，但仍保留子会话文件。新功能不自动导入旧版本未登记的 BTW 文件。
 
 ## 显示与网络
+
+BTW 状态栏在当前分支编号与来源后，复用 `/btw list` 的暗色“第一条 … 最新一条”正文摘要；新消息完成后更新，不请求模型，并按终端宽度截断。
 
 使用 Pi 原生用户、助手、custom message 和工具执行组件，保留 Markdown、代码高亮、thinking 和错误显示。IPC 同步后台状态、流式内容与最终回复；切走再返回仍能看到最新内容。进程故障也会显示，不把空正文当作没有消息。
 

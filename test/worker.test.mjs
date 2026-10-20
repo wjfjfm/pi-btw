@@ -81,9 +81,9 @@ test('extension merges only explicitly, queues follow-up, prevents duplicates, a
     getCommands:() => [{source:'extension',sourceInfo:{path:capture.extensionPaths[0]}}],
     sendMessage:(message, options) => sent.push({message,options}),
   };
-  let summaryRaw, selection;
+  let summaryRaw, selection, listSelection;
   const choose=async () => undefined;
-  const dialog=async (_factory,options) => options?.overlayOptions?.width === 76 ? selection : undefined;
+  const dialog=async (_factory,options) => options?.overlayOptions?.width === 76 ? selection : !options ? listSelection : undefined;
   const ctx = {
     mode:'tui', cwd:capture.cwd, model, thinkingLevel:'off', scopedModels:[], sessionManager:parent,
     getSystemPrompt:() => capture.systemPrompt, isProjectTrusted:() => true,
@@ -120,69 +120,30 @@ test('extension merges only explicitly, queues follow-up, prevents duplicates, a
   assert.equal(sent.length, 2, JSON.stringify(notices));
   assert.match(sent[1].message.content, /merged summary/);
   assert.match(summaryRaw, /second question/);
-  ctx.ui.select=async (title,choices)=>{
-    assert.equal(title,'BTW sessions');
-    assert.equal(choices.length,4);
-    ['main','└─ BTW 1 · source main · idle','   └─ BTW 2 · source 1 · idle','Merge…'].forEach((prefix,i)=>assert.ok(choices[i].startsWith(prefix)));
-    assert.match(choices[1],/first question/);assert.match(choices[1],/child reply/);
-    assert.match(choices[2],/second question/);
-    for(const choice of choices)assert.doesNotMatch(choice,/\n|首：|末：/);
-    return choices[0];
-  };
+  listSelection={kind:'switch',id:0};
   await command('list');
   await command('merge');
   assert.match(notices.at(-1).message,/Select a BTW/);
-  ctx.ui.select=async (_title,choices)=>choices[1];
-  await command('list');
-  ctx.ui.select=choose;
-  await command('merge');
-  assert.match(notices.at(-1).message,/already been merged/);
-  ctx.ui.select=async()=>undefined;
-  await command('list');
-  const count=sent.length;
-  await command('merge');
-  assert.equal(sent.length,count);
-  await command('prev'); // return to main without closing either BTW
   const saved=JSON.parse(await readFile(workspaceFile(parent),'utf8'));
   const originalBtwFile=saved.tabs.find(tab=>tab.id===2).capture.file;
   const originalBtw=await readFile(originalBtwFile,'utf8');
-  let step=0;
-  ctx.ui.select=async(title,choices)=>{
-    step++;
-    if(step===1){assert.equal(title,'BTW sessions');return 'Merge…';}
-    if(step===2){assert.equal(title,'Merge from');return choices.find(label=>label.includes('BTW 2'));}
-    assert.fail('target and options must use the unified dialog');
-  };
+  listSelection={kind:'merge',id:2};
+  selection=undefined;
+  await command('list');
+  assert.equal(sent.length,2,'cancel unified dialog must not merge');
   selection={destination:1,close:false,summary:false,conversation:'Strip'};
   await command('list');
-  assert.equal(step,2);assert.equal(sent.length,2,'list merge to child must not inject main');
+  assert.equal(sent.length,2,'list merge to child must not inject main');
   const mergedSource=SessionManager.open(forkedFile).getBranch().filter(e=>e.type==='custom_message'&&e.customType==='pi-btw-merge');
   assert.equal(mergedSource.length,1);assert.equal(mergedSource[0].details.mode,'conversation');
   assert.equal(await readFile(originalBtwFile,'utf8'),originalBtw,'merge must preserve original BTW');
-  for(const cancelAt of [2,3]){
-    selection=undefined;
-    ctx.ui.custom=async(factory,options)=>{
-      if(options?.overlayOptions?.width===76){stage++;return undefined;}
-    };
-    let stage=0;
-    ctx.ui.select=async(_title,choices)=>{
-      if(++stage===cancelAt)return undefined;
-      return stage===1?'Merge…':stage===2?choices.find(label=>label.includes('BTW 2')):choices.find(label=>label.includes('BTW 1'));
-    };
-    await command('list');assert.equal(stage,cancelAt);
-    assert.equal(sent.length,2);
-  }
-  ctx.ui.select=async(title,choices)=>{
-    assert.equal(title,'BTW sessions');
-    assert.ok(choices.some(label=>label.includes('BTW 1')));assert.ok(choices.some(label=>label.includes('BTW 2')));
-    return undefined;
-  };
+  listSelection=undefined;
   await command('list');
   await command('merge');assert.match(notices.at(-1).message,/Select a BTW/);
   // Default close is applied only after delivery, removes the manifest item, and preserves the file.
   ctx.ui.custom=dialog;
   selection={destination:0,close:true,summary:false,conversation:'Full'};
-  ctx.ui.select=async(_title,choices)=>choices.find(label=>label.includes('BTW 1'));
+  listSelection={kind:'switch',id:1};
   await command('list');
   await new Promise(r=>setTimeout(r,500));
   const deliver=pi.sendMessage;

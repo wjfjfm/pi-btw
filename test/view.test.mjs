@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { initTheme } from '@earendil-works/pi-coding-agent';
+import {mkdtempSync,rmSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {childPreview,inlinePreview} from '../dist/preview.js';
+import { SessionManager, initTheme } from '@earendil-works/pi-coding-agent';
 import { visibleWidth } from '@earendil-works/pi-tui';
 import { BtwView } from '../dist/view.js';
 
@@ -24,6 +28,24 @@ test('native view fits terminal, preserves draft, and switches without cancellin
   f.view.handleInput('\x1b');assert.equal(f.actions.at(-1).kind,'main');assert.equal(f.tab.draft,'draft');
   f.view.handleInput('\x03');assert.equal(f.counts().aborted,1);
   f.view.dispose();assert.equal(f.counts().disposed,1);
+});
+test('footer reuses list preview and refreshes on new messages',t=>{
+  const dir=mkdtempSync(join(tmpdir(),'btw-footer-preview-'));
+  t.after(()=>rmSync(dir,{recursive:true,force:true}));
+  const manager=SessionManager.create(dir,dir);
+  manager.appendMessage({role:'user',content:'INHERITED',timestamp:1});
+  manager.appendMessage(assistant([{type:'text',text:'inherited reply'}]));
+  const boundary=manager.appendCustomEntry('boundary',{});
+  manager.appendMessage({role:'user',content:'branch question',timestamp:2});
+  const f=fixture();f.tab.child.manager=manager;f.tab.child.boundary=boundary;
+  const footer=()=>f.view.render(160).at(-1);
+  assert.ok(footer().endsWith(inlinePreview(childPreview(f.tab.child))));
+  assert.match(footer(),/branch question/);assert.doesNotMatch(footer(),/INHERITED/);
+  manager.appendMessage(assistant([{type:'thinking',thinking:'SECRET'},{type:'text',text:'latest answer'}]));
+  f.session.messages=[...f.session.messages];f.changed();
+  assert.ok(footer().endsWith(inlinePreview(childPreview(f.tab.child))));
+  assert.match(footer(),/branch question … latest answer/);assert.doesNotMatch(footer(),/SECRET/);
+  f.view.dispose();
 });
 test('normal footer content is retained and current BTW identity is explicit',()=>{
   const f=fixture();
