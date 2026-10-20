@@ -14,7 +14,6 @@ export class BtwView {
   private offset = 0;
   private preview?: { messages: Tab["child"]["session"]["messages"]; lines: string[] };
   private error = "";
-  private menu?: "close";
   private cache?: { width: number; lines: string[] };
   private history?: { width: number; messages: Tab["child"]["session"]["messages"]; lines: string[] };
   constructor(private tui: TUI, private theme: Theme, private tab: Tab,
@@ -37,13 +36,7 @@ export class BtwView {
   invalidate() { this.cache = undefined; this.history = undefined; this.editor.invalidate(); }
   saveDraft() { this.tab.draft = this.editor.getText(); }
   dispose() { this.saveDraft(); this.unsubscribe(); }
-  showClose() { this.menu = "close"; this.tui.requestRender(); }
   handleInput(data: string) {
-    if (this.menu) {
-      if (matchesKey(data,"escape") || data === "n") this.menu = undefined;
-      else if (this.menu === "close" && data === "y") this.action({kind:"close"});
-      this.tui.requestRender(); return;
-    }
     for (const [key,kind] of [["ctrl+b","prev"],["ctrl+f","next"],["escape","main"]] as const)
       if (matchesKey(data,key)) { this.action({kind}); return; }
     if (matchesKey(data,"ctrl+c")) {
@@ -96,8 +89,7 @@ export class BtwView {
       this.theme.fg("accent",`当前会话：BTW ${this.tab.id} · 来源：${this.tab.source ? `BTW ${this.tab.source}` : "main"}`)
         + inlinePreview(this.preview.lines,text => this.theme.fg("dim",text))]
       .slice(0,Math.max(0,height-5));
-    const hint = this.menu === "close" ? "Close this BTW? Background execution will stop. [y] yes  [n/Esc] cancel"
-      : this.error || session.error || this.tab.notice || "";
+    const hint = this.error || session.error || this.tab.notice || "";
     const footer = wrapTextWithAnsi(hint ? `${hint}\n${HELP}` : HELP,Math.max(1,width)).slice(0,Math.max(1,Math.min(Math.floor(height/3),height-status.length-3)));
     const editor = this.editor.render(width).slice(-(height-footer.length-status.length-1));
     const room = Math.max(0,height-editor.length-footer.length-status.length-1);

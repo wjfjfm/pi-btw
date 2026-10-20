@@ -22,7 +22,6 @@ export default function btw(pi: ExtensionAPI) {
   let view: BtwView | undefined;
   let finish: ((action: ViewAction) => void) | undefined;
   let summaryAbort: AbortController | undefined;
-  let menu: "close" | undefined;
   let manifest: string | undefined;
   let persistenceReady = true;
   let uiContext: ExtensionContext | undefined;
@@ -163,7 +162,7 @@ export default function btw(pi: ExtensionAPI) {
       return;
     }
     if (verb === "next" || verb === "prev") { workspace.move(verb === "next" ? 1 : -1); return; }
-    if (verb === "close") { if (merging || creating) throw new Error("BTW operation in progress"); selected(); menu = "close"; return; }
+    if (verb === "close") { await perform({kind:"close"},ctx); return; }
     if (verb === "merge") {
       const tab = selected();
       if (rest.length > 1 || (rest.length && !["source","main"].includes(rest[0])))
@@ -198,8 +197,6 @@ export default function btw(pi: ExtensionAPI) {
             if (merging) throw new Error("Summary/merge in progress");
             await tab.child.session.prompt(text);
           });
-          if (menu === "close") view.showClose();
-          menu = undefined;
           return view;
         },{overlay:true,overlayOptions:{width:"100%",maxHeight:"100%",anchor:"top-left",margin:0}});
         save(); finish = undefined; view = undefined;

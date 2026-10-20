@@ -170,6 +170,12 @@ test('extension merges only explicitly, queues follow-up, prevents duplicates, a
   assert.ok(!afterClose.tabs.some(tab=>tab.id===1));
   assert.ok(afterClose.tabs.some(tab=>tab.id===2));
   assert.match(await readFile(forkedFile,'utf8'),/first question/);
+  listSelection={kind:'switch',id:2};
+  await command('list');
+  await command('close'); // no confirmation interaction
+  assert.equal(JSON.parse(await readFile(workspaceFile(parent),'utf8')).tabs.length,0);
+  assert.equal(await readFile(originalBtwFile,'utf8'),originalBtw);
+  await command('merge');assert.match(notices.at(-1).message,/Select a BTW/);
 });
 
 test('fork while a real parent SDK tool is running never waits for or aborts the parent', {timeout:30000}, async t => {
