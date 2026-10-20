@@ -4,21 +4,44 @@ import { initTheme } from '@earendil-works/pi-coding-agent';
 import { visibleWidth } from '@earendil-works/pi-tui';
 import { BtwView } from '../dist/view.js';
 
-test('fullscreen view fits terminal, propagates focus and closes without aborting child', () => {
+function fixture(messages=[]) {
   initTheme('dark');
-  let aborted=0, disposed=0, closed;
-  const tui = {terminal:{rows:20},requestRender:() => {}};
-  const child = {session:{isStreaming:true,messages:[{role:'user',content:'中文界面🙂 '.repeat(80)}],
-    subscribe:() => () => {disposed++;},abort:async () => {aborted++;}}};
-  const view = new BtwView(tui,{fg:(_name,text) => text},child,'draft',draft => {closed=draft;},async () => {});
-  view.focused=true; assert.equal(view.focused,true);
-  for (const width of [12,40,120]) {
-    const lines=view.render(width);
-    assert.equal(lines.length,20);
-    for (const line of lines) assert.ok(visibleWidth(line)<=width);
+  const actions=[];let aborted=0,disposed=0,observer;
+  const tui={terminal:{rows:24},requestRender:()=>{}};
+  const session={isStreaming:false,messages,observe:fn=>{observer=fn;return()=>{disposed++;};},abort:async()=>{aborted++;}};
+  const tab={id:2,source:1,draft:'draft',child:{cwd:'/tmp',session}};
+  const view=new BtwView(tui,{fg:(_name,text)=>text},tab,a=>actions.push(a),async()=>{});
+  return {view,tab,session,actions,changed:()=>observer(),counts:()=>({aborted,disposed})};
+}
+const assistant=(content,extra={})=>({role:'assistant',content,stopReason:'stop',timestamp:1,...extra});
+test('native view fits terminal, preserves draft, and switches without cancelling',()=>{
+  const f=fixture([{role:'user',content:'中文界面🙂 '.repeat(80)}]);
+  f.view.focused=true;assert.equal(f.view.focused,true);
+  for(const width of [12,40,120]){
+    const lines=f.view.render(width);assert.equal(lines.length,24);
+    for(const line of lines)assert.ok(visibleWidth(line)<=width);
   }
-  view.handleInput('\u001b');
-  assert.equal(closed,'draft'); assert.equal(aborted,0);
-  view.handleInput('\u0003'); assert.equal(aborted,1);
-  view.dispose(); assert.equal(disposed,1);
+  f.view.handleInput('\x1b');assert.equal(f.actions.at(-1).kind,'main');assert.equal(f.tab.draft,'draft');
+  f.view.handleInput('\x03');assert.equal(f.counts().aborted,1);
+  f.view.dispose();assert.equal(f.counts().disposed,1);
+});
+test('native assistant displays fetch errors even without text, and renders streamed/final replies',()=>{
+  const f=fixture([assistant([],{stopReason:'error',errorMessage:'fetch failed'})]);
+  assert.match(f.view.render(100).join('\n'),/fetch failed/);
+  f.session.partial=assistant([{type:'text',text:'**streamed reply**'}]);f.changed();
+  let rendered=f.view.render(100).join('\n');assert.match(rendered,/streamed reply/);assert.doesNotMatch(rendered,/\*\*streamed reply\*\*/);
+  f.session.partial=undefined;f.session.messages=[...f.session.messages,assistant([{type:'text',text:'final reply'}])];f.changed();
+  assert.match(f.view.render(100).join('\n'),/final reply/);
+  f.session.error='worker disconnected';f.changed();assert.match(f.view.render(100).join('\n'),/worker disconnected/);
+  f.view.dispose();
+});
+test('bidirectional shortcuts, merge target/mode menu and close confirmation',()=>{
+  const f=fixture();
+  f.view.handleInput('\x1b[98;7u');assert.equal(f.actions.at(-1).kind,'prev');
+  f.view.handleInput('\x1b[102;7u');assert.equal(f.actions.at(-1).kind,'next');
+  f.view.handleInput('\x1b[110;7u');assert.equal(f.actions.at(-1).kind,'new');
+  f.view.showMerge();f.view.handleInput('m');f.view.handleInput('s');
+  assert.deepEqual(f.actions.at(-1),{kind:'command',text:'merge main summary'});
+  f.view.showClose();const n=f.actions.length;f.view.handleInput('n');assert.equal(f.actions.length,n);
+  f.view.showClose();f.view.handleInput('y');assert.equal(f.actions.at(-1).kind,'close');f.view.dispose();
 });

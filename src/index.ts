@@ -1,105 +1,146 @@
 import { SessionManager, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { captureChild, startChild, type Child } from "./child.js";
+import { captureChild, startChild } from "./child.js";
 import { rawConversation } from "./snapshot.js";
-import { BtwView } from "./view.js";
+import { BtwView, type ViewAction } from "./view.js";
 import { mergeContent } from "./merge.js";
+import { Workspace, type Tab } from "./workspace.js";
 
 export default function btw(pi: ExtensionAPI) {
-  let child: Child | undefined;
+  const workspace = new Workspace();
   let partial: unknown;
+  let generation = 0;
+  let parentId: string | undefined;
   let creating = false;
   let merging = false;
-  let generation = 0;
-  let draft = "";
-  let closeView: (() => void) | undefined;
-  let currentParent: string | undefined;
+  let showing = false;
+  let view: BtwView | undefined;
+  let finish: ((action: ViewAction) => void) | undefined;
   let summaryAbort: AbortController | undefined;
-  let lastMergedLeaf: string | null | undefined;
-
-  pi.on("session_start", (_event, ctx) => { currentParent = ctx.sessionManager.getSessionId(); });
+  let menu: "merge" | "close" | undefined;
+  const error = (ctx: ExtensionContext, e: unknown) => ctx.ui.notify(String(e),"error");
+  function reset() {
+    generation++; summaryAbort?.abort(); finish?.({kind:"main"}); workspace.dispose(); partial = undefined;
+  }
+  pi.on("session_start", (_event,ctx) => {
+    const id = ctx.sessionManager.getSessionId();
+    if (parentId && parentId !== id) reset();
+    parentId = id;
+  });
   pi.on("message_update", event => { partial = event.message; });
   pi.on("message_end", () => { partial = undefined; });
-  pi.on("session_shutdown", () => {
-    generation++; summaryAbort?.abort(); closeView?.(); child?.session.dispose();
-    child = undefined; partial = undefined; currentParent = undefined;
-  });
+  pi.on("session_shutdown", () => { reset(); parentId = undefined; });
 
-  const notifyError = (ctx: ExtensionContext, error: unknown) => ctx.ui.notify(String(error), "error");
-  async function merge(mode: string, ctx: ExtensionContext) {
-    const target = child;
-    if (!target) throw new Error("No BTW session");
-    if (mode !== "full" && mode !== "summary") throw new Error("Use /btw merge full|summary");
-    if (merging || target.session.isStreaming) throw new Error("Wait until BTW is idle before merging");
-    const manager = SessionManager.open(target.manager.getSessionFile()!);
+  async function create(ctx: ExtensionContext, prompt?: string) {
+    if (creating) throw new Error("BTW is being created");
+    creating = true;
+    const version = generation, source = workspace.current;
+    try {
+      const capture = source ? await workspace.tabs.get(source)!.child.session.snapshot() : captureChild(pi,ctx,partial);
+      const child = await startChild(capture);
+      if (version !== generation) { child.session.dispose(); return; }
+      const tab = workspace.add(child,source);
+      ctx.ui.notify(`BTW ${tab.id} forked from ${source || "main"}: ${child.manager.getSessionFile()}`,"info");
+      if (prompt) void child.session.prompt(prompt).catch(e => error(ctx,e));
+    } finally { creating = false; }
+  }
+  function selected() {
+    const tab = workspace.tabs.get(workspace.current);
+    if (!tab) throw new Error("Select a BTW first using Ctrl+Alt+B/F");
+    return tab;
+  }
+  async function merge(tab: Tab, target: "source" | "main", mode: string, ctx: ExtensionContext) {
+    if (merging || tab.child.session.isStreaming) throw new Error("Wait until BTW is idle before merging");
+    if (tab.child.session.closed) throw new Error("BTW process is closed");
+    const destination = workspace.destination(tab,target);
+    const manager = SessionManager.open(tab.child.manager.getSessionFile()!);
     const leaf = manager.getLeafId();
-    if (leaf === lastMergedLeaf) throw new Error("This BTW revision has already been merged");
-    const raw = rawConversation(manager, target.boundary);
-    if (!raw) throw new Error("No BTW conversation to merge");
+    if (tab.merged.has(destination) && tab.merged.get(destination) === leaf) throw new Error("This BTW revision has already been merged to this target");
     merging = true;
     const version = generation;
     try {
       summaryAbort = new AbortController();
-      const content = await mergeContent(raw, mode, ctx, summaryAbort.signal);
-      if (generation !== version || currentParent !== target.origin.parentId)
-        throw new Error("Parent session changed; merge cancelled");
-      pi.sendMessage({ customType: "pi-btw-merge", display: true,
-        content: `BTW ${mode === "full" ? "full transcript (raw JSONL)" : "summary"} — explicit user merge\nSession: ${target.manager.getSessionFile()}\n\n${content}`,
-        details: { sessionId: target.manager.getSessionId(), mode, leaf },
-      }, { triggerTurn: true, deliverAs: "followUp" });
-      lastMergedLeaf = leaf;
-      ctx.ui.notify("BTW merged into parent", "info");
+      const content = await mergeContent(rawConversation(manager,tab.child.boundary),mode,ctx,summaryAbort.signal);
+      if (version !== generation || ctx.sessionManager.getSessionId() !== parentId) throw new Error("Main session changed; merge cancelled");
+      workspace.destination(tab,target);
+      const message = {customType:"pi-btw-merge",display:true,
+        content:`BTW ${mode === "full" ? "full transcript (raw JSONL)" : "summary"} — explicit user merge\nSession: ${manager.getSessionFile()}\n\n${content}`,
+        details:{sessionId:manager.getSessionId(),mode,leaf}};
+      if (destination === 0) pi.sendMessage(message,{triggerTurn:true,deliverAs:"followUp"});
+      else await workspace.tabs.get(destination)!.child.session.merge(message);
+      tab.merged.set(destination,leaf);
+      tab.notice = `BTW ${tab.id} merged to ${destination || "main"}`;
+      ctx.ui.notify(tab.notice,"info");
     } finally { merging = false; summaryAbort = undefined; }
   }
-
-  async function open(ctx: ExtensionContext, fresh = false, prompt?: string) {
-    if (ctx.mode !== "tui") throw new Error("BTW currently requires interactive TUI mode");
-    if (closeView) { closeView(); return; }
-    if (creating) throw new Error("BTW is being created");
-    if (fresh && child) throw new Error("Use /btw close before creating another BTW");
-    if (!child) {
-      creating = true;
-      const version = generation;
-      try {
-        const capture = captureChild(pi, ctx, partial);
-        const created = await startChild(capture);
-        if (version !== generation) { created.session.dispose(); return; }
-        child = created; lastMergedLeaf = undefined;
-        currentParent = capture.origin.parentId;
-        ctx.ui.notify(`BTW forked: ${created.manager.getSessionFile()}${capture.pendingCount ? ` (${capture.pendingCount} unfinished parent calls not replayed)` : ""}`, "info");
-      } finally { creating = false; }
+  async function command(args: string, ctx: ExtensionContext) {
+    const [verb,...rest] = args.trim().split(/\s+/);
+    if (verb === "next" || verb === "prev") { workspace.move(verb === "next" ? 1 : -1); return; }
+    if (verb === "close") { if (merging || creating) throw new Error("BTW operation in progress"); selected(); menu = "close"; return; }
+    if (verb === "merge") {
+      const tab = selected();
+      if (!rest.length) { menu = "merge"; return; }
+      const [target,mode] = rest.length === 1 ? ["source",rest[0]] : rest;
+      if (rest.length > 2 || (target !== "source" && target !== "main") || !["full","summary"].includes(mode))
+        throw new Error("Use /btw merge [source|main] full|summary");
+      await merge(tab,target,mode,ctx); return;
     }
-    const target = child;
-    if (!target) return;
-    if (prompt && merging) throw new Error("Summary/merge in progress");
-    if (prompt) void target.session.prompt(prompt, { streamingBehavior: "followUp" }).catch(error => notifyError(ctx, error));
-    await ctx.ui.custom<void>((tui, theme, _keys, done) => {
-      closeView = () => done();
-      return new BtwView(tui, theme, target, draft, value => { draft = value; done(); }, async text => {
-        if (text === "/main") { done(); return; }
-        if (text.startsWith("/merge ")) { await merge(text.slice(7).trim(), ctx); done(); return; }
-        if (merging) throw new Error("Summary/merge in progress");
-        await target.session.prompt(text, { streamingBehavior: "followUp" });
-      });
-    }, { overlay: true, overlayOptions: { width: "100%", maxHeight: "100%", anchor: "top-left", margin: 0 } });
-    closeView = undefined;
+    if (verb === "new") { await create(ctx,rest.join(" ") || undefined); return; }
+    await create(ctx,args.trim() || undefined);
   }
-
-  pi.registerCommand("btw", {
-    description: "Independent fork: /btw [question] | new | merge full|summary | close",
-    handler: async (args, ctx) => {
-      try {
-        const command = args.trim();
-        if (command === "close") {
-          if (creating || merging) throw new Error("Wait for BTW creation/merge to finish");
-          closeView?.(); child?.session.dispose(); child = undefined; draft = "";
-          ctx.ui.notify("BTW closed (session file retained)", "info");
-        } else if (command.startsWith("merge ")) await merge(command.slice(6).trim(), ctx);
-        else await open(ctx, command === "new", command && command !== "new" ? command : undefined);
-      } catch (error) { notifyError(ctx, error); }
-    },
-  });
-  for (const key of ["ctrl+alt+b", "ctrl+alt+f"] as const) pi.registerShortcut(key, {
-    description: "Toggle full-screen BTW / parent (create BTW if needed)",
-    handler: async ctx => { try { await open(ctx); } catch (error) { notifyError(ctx, error); } },
-  });
+  async function perform(action: ViewAction,ctx: ExtensionContext) {
+    if (action.kind === "main") workspace.current = 0;
+    else if (action.kind === "next" || action.kind === "prev") workspace.move(action.kind === "next" ? 1 : -1);
+    else if (action.kind === "new") await create(ctx);
+    else if (action.kind === "close") {
+      if (merging || creating) throw new Error("BTW operation in progress");
+      workspace.close(selected().id);
+    } else if (action.kind === "merge") menu = "merge";
+    else await command(action.text || "",ctx);
+  }
+  async function show(ctx: ExtensionContext) {
+    if (showing) return;
+    showing = true;
+    const version = generation;
+    try {
+      while (workspace.current && version === generation) {
+        const tab = selected();
+        const action = await ctx.ui.custom<ViewAction>((tui,theme,_keys,done) => {
+          finish = done;
+          view = new BtwView(tui,theme,tab,done,async text => {
+            if (merging) throw new Error("Summary/merge in progress");
+            await tab.child.session.prompt(text);
+          });
+          if (menu === "merge") view.showMerge();
+          if (menu === "close") view.showClose();
+          menu = undefined;
+          return view;
+        },{overlay:true,overlayOptions:{width:"100%",maxHeight:"100%",anchor:"top-left",margin:0}});
+        finish = undefined; view = undefined;
+        if (!action || version !== generation) break;
+        try { await perform(action,ctx); } catch (e) {
+          const current = workspace.tabs.get(workspace.current);
+          if (current) current.notice = String(e);
+          error(ctx,e);
+        }
+      }
+    } finally { showing = false; finish = undefined; view = undefined; }
+  }
+  async function run(ctx: ExtensionContext,action: ViewAction) {
+    try {
+      if (ctx.mode !== "tui") throw new Error("BTW requires interactive TUI mode");
+      if (creating || merging) throw new Error("BTW operation in progress");
+      if (showing) { finish?.(action); return; }
+      await perform(action,ctx); await show(ctx);
+    } catch (e) { error(ctx,e); }
+  }
+  pi.registerCommand("btw",{description:"Fork BTW | next | prev | merge [source|main] full|summary | close",
+    handler:async (args,ctx) => { await run(ctx,{kind:"command",text:args}); }});
+  for (const [key,kind] of [["ctrl+alt+b","prev"],["ctrl+alt+f","next"],["ctrl+alt+n","new"]] as const)
+    pi.registerShortcut(key,{description:`BTW ${kind}`,handler:async ctx => { await run(ctx,{kind}); }});
+  pi.registerShortcut("ctrl+alt+m",{description:"Merge current BTW",handler:async ctx => {
+    if (view) view.showMerge(); else ctx.ui.notify("Select a BTW first using Ctrl+Alt+B/F","info");
+  }});
+  pi.registerShortcut("ctrl+alt+x",{description:"Close current BTW",handler:async ctx => {
+    if (view) view.showClose(); else ctx.ui.notify("Select a BTW first using Ctrl+Alt+B/F","info");
+  }});
 }

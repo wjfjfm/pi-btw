@@ -83,7 +83,6 @@ test('extension merges only explicitly, queues follow-up, prevents duplicates, a
   btw(pi); handlers.get('session_start')({}, ctx);
   t.after(() => handlers.get('session_shutdown')());
   const command = args => commands.get('btw')(args, ctx);
-  await command('');
   assert.equal(sent.length, 0);
   await command('first question');
   await new Promise(r => setTimeout(r, 500));
@@ -97,10 +96,10 @@ test('extension merges only explicitly, queues follow-up, prevents duplicates, a
   assert.match(notices.at(-1).message, /already been merged/);
   await command('second question');
   await new Promise(r => setTimeout(r, 500));
-  await command('merge summary');
+  await command('merge main summary');
   assert.equal(sent.length, 2, JSON.stringify(notices));
   assert.match(sent[1].message.content, /merged summary/);
-  assert.match(summaryRaw, /first question/); assert.match(summaryRaw, /second question/);
+  assert.match(summaryRaw, /second question/);
   await command('close');
 });
 
@@ -139,6 +138,29 @@ test('fork while a real parent SDK tool is running never waits for or aborts the
   release();await running;
   assert.equal(session.isStreaming,false);
   assert.equal(calls,2);
+});
+
+test('nested BTW captures current child state, runs independently, and explicitly merges to source', {timeout:30000}, async t => {
+  const {parent,capture}=await fixture(t);
+  const first=await startChild(capture);t.after(()=>first.session.dispose());
+  let updates=0;const off=first.session.observe(()=>updates++);t.after(off);
+  await first.session.prompt('source conversation');
+  const snapshot=await first.session.snapshot();
+  assert.equal(snapshot.origin.parentId,first.manager.getSessionId());
+  const second=await startChild(snapshot);t.after(()=>second.session.dispose());
+  await second.session.prompt('nested question');
+  assert.match(JSON.stringify(second.session.messages),/source conversation/);
+  assert.match(JSON.stringify(second.session.messages),/nested question/);
+  assert.doesNotMatch(JSON.stringify(first.session.messages),/nested question/);
+  const message={customType:'pi-btw-merge',content:'explicit nested result',display:true};
+  await first.session.merge(message);
+  for(let i=0;i<100 && first.session.isStreaming;i++)await new Promise(r=>setTimeout(r,20));
+  assert.match(JSON.stringify(first.session.messages),/explicit nested result/);
+  assert.ok(updates>0);
+  assert.doesNotMatch(await readFile(parent.getSessionFile(),'utf8'),/source conversation|nested question|explicit nested result/);
+  first.session.dispose();
+  await second.session.prompt('source closed but descendant still works');
+  assert.match(JSON.stringify(second.session.messages),/source closed but descendant still works/);
 });
 
 test('missing inherited tool fails explicitly, without touching parent', {timeout:30000}, async t => {

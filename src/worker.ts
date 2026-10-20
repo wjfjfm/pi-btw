@@ -1,23 +1,33 @@
 import {
   createAgentSession, createCodemodeExtension, createMcpExtension, createToolSearchExtension,
-  DefaultResourceLoader, SettingsManager, SessionManager, type AgentSession,
+  DefaultResourceLoader, SettingsManager, SessionManager, type AgentSession, type ExtensionAPI, type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import type { WorkerConfig } from "./child.js";
+import { captureChild, type WorkerConfig } from "./child.js";
+import { configureNetwork } from "./network.js";
 
 let session: AgentSession | undefined;
+let api: ExtensionAPI;
+let context: ExtensionContext;
+let partial: unknown;
+let config: WorkerConfig;
 function send(value: unknown) { if (process.connected) process.send?.(value); }
 process.on("disconnect", () => { session?.dispose(); process.exit(0); });
-process.on("message", async (request: { id: number; method: string; config?: WorkerConfig; text?: string }) => {
+process.on("message", async (request: { id: number; method: string; config?: WorkerConfig; text?: string; message?: Parameters<AgentSession["sendCustomMessage"]>[0] }) => {
   try {
     if (request.method === "init") {
       if (session) throw new Error("Already initialized");
-      const c = request.config!;
+      const c = config = request.config!;
+      await configureNetwork(c.settings);
       const settingsManager = SettingsManager.inMemory(c.settings);
       const resourceLoader = new DefaultResourceLoader({
         cwd: c.cwd, agentDir: c.agentDir, settingsManager,
         additionalExtensionPaths: c.extensionPaths,
         extensionFactories: [
-          pi => { pi.on("before_agent_start", () => ({ systemPrompt: c.systemPrompt })); },
+          pi => {
+            api = pi;
+            pi.on("session_start", (_event, ctx) => { context = ctx; });
+            pi.on("before_agent_start", () => ({ systemPrompt: c.systemPrompt }));
+          },
           { name: "codemode", builtin: true, factory: createCodemodeExtension({ mode: "on" }) },
           { name: "tool_search", builtin: true, factory: createToolSearchExtension() },
           { name: "mcp", builtin: true, factory: createMcpExtension() },
@@ -37,6 +47,8 @@ process.on("message", async (request: { id: number; method: string; config?: Wor
       if (missing.length) throw new Error(`Cannot inherit active tools: ${missing.join(", ")}`);
       session.setActiveToolsByName(c.tools);
       session.subscribe(event => {
+        if (event.type === "message_update") partial = event.message;
+        if (event.type === "message_end") partial = undefined;
         send({ type: "event", event, streaming: session!.isStreaming,
           ...(event.type === "message_end" || event.type === "agent_settled" ? { messages: session!.messages } : {}) });
       });
@@ -44,6 +56,16 @@ process.on("message", async (request: { id: number; method: string; config?: Wor
     } else if (request.method === "prompt") {
       if (!session) throw new Error("Not initialized");
       await session.prompt(request.text!, { streamingBehavior: "followUp" });
+    } else if (request.method === "snapshot") {
+      if (!session || !context) throw new Error("Not initialized");
+      const { manager, ...capture } = captureChild(api, context, partial);
+      capture.agentDir = config.agentDir;
+      capture.extensionPaths = [...new Set([...config.extensionPaths, ...capture.extensionPaths])];
+      send({ type: "response", id: request.id, value: { ...capture, file: manager.getSessionFile() } });
+      return;
+    } else if (request.method === "merge") {
+      if (!session || !request.message) throw new Error("Not initialized");
+      await session.sendCustomMessage(request.message, { triggerTurn: true, deliverAs: "followUp" });
     } else if (request.method === "abort") {
       await session?.abort();
     } else if (request.method === "dispose") {
