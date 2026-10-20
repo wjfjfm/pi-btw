@@ -12,9 +12,10 @@ export interface Tab {
 export class Workspace {
   tabs = new Map<number, Tab>();
   current = 0;
-  private serial = 0;
-  add(child: Child, source = this.current) {
-    const tab: Tab = { id: ++this.serial, source, child, draft: "", merged: new Map() };
+  serial = 0;
+  add(child: Child, source = this.current, id = this.serial + 1) {
+    this.serial = Math.max(this.serial,id);
+    const tab: Tab = { id, source, child, draft: "", merged: new Map() };
     this.tabs.set(tab.id, tab); this.current = tab.id;
     return tab;
   }
@@ -37,6 +38,6 @@ export class Workspace {
   }
   dispose() {
     for (const tab of this.tabs.values()) tab.child.session.dispose();
-    this.tabs.clear(); this.current = 0;
+    this.tabs.clear(); this.current = 0; this.serial = 0;
   }
 }

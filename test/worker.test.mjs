@@ -8,6 +8,8 @@ import { createAssistantMessageEventStream } from '@earendil-works/pi-ai';
 import { forkSnapshot } from '../dist/snapshot.js';
 import { startChild } from '../dist/child.js';
 import btw from '../dist/index.js';
+import {Workspace} from '../dist/workspace.js';
+import {saveWorkspace,restoreWorkspace,workspaceFile} from '../dist/persistence.js';
 
 const model = {id:'btw-test',name:'btw-test',api:'openai-completions',provider:'btw-test',baseUrl:'http://unused.invalid',reasoning:false,input:['text'],contextWindow:100000,maxTokens:1000,cost:{input:0,output:0,cacheRead:0,cacheWrite:0}};
 async function fixture(t) {
@@ -177,6 +179,39 @@ test('nested BTW captures current child state, runs independently, and explicitl
   first.session.dispose();
   await second.session.prompt('source closed but descendant still works');
   assert.match(JSON.stringify(second.session.messages),/source closed but descendant still works/);
+});
+
+test('workspace restores list lazily with same session, source, draft and merge state', {timeout:30000}, async t=>{
+  const {parent,capture}=await fixture(t);
+  const before=await readFile(parent.getSessionFile(),'utf8');
+  const w=new Workspace();const first=await startChild(capture);
+  await first.session.prompt('persisted conversation');
+  const a=w.add(first);a.draft='unfinished draft';a.merged.set(0,'merged-leaf');
+  const second=await startChild(await first.session.snapshot());const b=w.add(second);
+  const file=workspaceFile(parent);saveWorkspace(file,parent.getSessionId(),w);
+  const firstId=first.manager.getSessionId();w.dispose();await new Promise(r=>setTimeout(r,300));
+  const interrupted=SessionManager.open(first.manager.getSessionFile());
+  const lastAssistant=[...interrupted.buildSessionContext().messages].reverse().find(m=>m.role==='assistant');
+  interrupted.appendMessage({...lastAssistant,content:[{type:'toolCall',id:'interrupted-call',name:'bash',arguments:{command:'echo SHOULD_NOT_REPLAY'}}],stopReason:'toolUse'});
+  const restored=new Workspace();restoreWorkspace(file,parent.getSessionId(),restored);
+  t.after(()=>restored.dispose());
+  assert.equal(restored.current,0);assert.equal(restored.tabs.size,2);
+  const ra=restored.tabs.get(a.id),rb=restored.tabs.get(b.id);
+  assert.equal(rb.source,a.id);assert.equal(ra.draft,'unfinished draft');assert.equal(ra.merged.get(0),'merged-leaf');
+  assert.equal(ra.child.session.dormant,true);assert.equal(rb.child.session.dormant,true);
+  assert.equal(ra.child.manager.getSessionId(),firstId);
+  assert.match(JSON.stringify(ra.child.session.messages),/persisted conversation/);
+  await ra.child.session.prompt('after reload');
+  assert.equal(ra.child.session.dormant,false);assert.equal(rb.child.session.dormant,true);
+  assert.match(JSON.stringify(ra.child.session.messages),/after reload/);
+  const sealed=ra.child.session.messages.find(m=>m.role==='toolResult'&&m.toolCallId==='interrupted-call');
+  assert.equal(sealed.isError,true);assert.match(JSON.stringify(sealed),/NOT been replayed/);
+  assert.equal(await readFile(parent.getSessionFile(),'utf8'),before);
+  restored.close(a.id);saveWorkspace(file,parent.getSessionId(),restored);
+  const again=new Workspace();restoreWorkspace(file,parent.getSessionId(),again);t.after(()=>again.dispose());
+  assert.equal(again.tabs.size,1);assert.equal(again.tabs.get(b.id).source,a.id);
+  assert.throws(()=>again.destination(again.tabs.get(b.id),'source'),/closed/);
+  assert.throws(()=>restoreWorkspace(file,'different-parent',new Workspace()),/Invalid/);
 });
 
 test('missing inherited tool fails explicitly, without touching parent', {timeout:30000}, async t => {

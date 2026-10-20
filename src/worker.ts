@@ -4,6 +4,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { captureChild, type WorkerConfig } from "./child.js";
 import { configureNetwork } from "./network.js";
+import { sealPendingCalls } from "./snapshot.js";
 
 let session: AgentSession | undefined;
 let api: ExtensionAPI;
@@ -36,9 +37,11 @@ process.on("message", async (request: { id: number; method: string; config?: Wor
       await resourceLoader.reload({ resolveProjectTrust: async () => c.trusted });
       const errors = resourceLoader.getExtensions().errors;
       if (errors.length) throw new Error(`BTW extension loading failed: ${JSON.stringify(errors)}`);
+      const sessionManager = SessionManager.open(c.file);
+      sealPendingCalls(sessionManager,"BTW restored after interruption: no finalized result was saved for this call. Its side effects are unknown. It has NOT been replayed; inspect state before retrying.");
       ({ session } = await createAgentSession({
         cwd: c.cwd, agentDir: c.agentDir, model: c.model, thinkingLevel: c.thinkingLevel,
-        scopedModels: c.scopedModels, sessionManager: SessionManager.open(c.file),
+        scopedModels: c.scopedModels, sessionManager,
         settingsManager, resourceLoader,
       }));
       await session.bindExtensions({ mode: "print", onError: error => send({ type: "error", error: String(error) }) });

@@ -33,11 +33,18 @@ export class ChildSession {
   private dead = false;
   private listeners = new Set<(event: AgentSessionEvent) => void>();
   private pending = new Map<number, { resolve: (value: any) => void; reject: (error: Error) => void }>();
-  private process: ChildProcess;
+  private process!: ChildProcess;
   private errors = "";
-  constructor(cwd: string) {
+  private resumeConfig?: WorkerConfig;
+  private waking?: Promise<void>;
+  get dormant() { return !!this.resumeConfig; }
+  constructor(private cwd: string, resumeConfig?: WorkerConfig) {
+    this.resumeConfig = resumeConfig;
+    if (!resumeConfig) this.launch();
+  }
+  private launch() {
     this.process = fork(fileURLToPath(new URL("../dist/worker.js", import.meta.url)), [], {
-      cwd, execArgv: [], stdio: ["ignore", "ignore", "pipe", "ipc"], serialization: "advanced",
+      cwd: this.cwd, execArgv: [], stdio: ["ignore", "ignore", "pipe", "ipc"], serialization: "advanced",
     });
     this.process.stderr?.on("data", chunk => { this.errors = (this.errors + chunk.toString()).slice(-8000); });
     this.process.on("message", (message: any) => {
@@ -76,22 +83,42 @@ export class ChildSession {
       });
     });
   }
+  async ensureStarted() {
+    if (this.dead) throw new Error("BTW process is closed");
+    if (this.waking) return this.waking;
+    if (!this.resumeConfig) return;
+    const config = this.resumeConfig;
+    this.resumeConfig = undefined;
+    this.launch();
+    this.waking = (async () => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await Promise.race([this.request("init", {config}),new Promise<never>((_resolve,reject) => {
+          timer = setTimeout(() => reject(new Error("BTW startup timed out")),60_000); timer.unref();
+        })]);
+      } catch (error) { this.dispose(); throw error; }
+      finally { clearTimeout(timer); this.waking = undefined; }
+    })();
+    return this.waking;
+  }
   async prompt(text: string, _options?: unknown) {
     this.error = ""; this.activePrompts++; this.changed();
-    try { await this.request("prompt", { text }); }
+    try { await this.ensureStarted(); await this.request("prompt", { text }); }
     finally { this.activePrompts--; this.changed(); }
   }
   async snapshot(): Promise<Capture> {
+    await this.ensureStarted();
     const { file, ...capture } = await this.request("snapshot");
     return { ...capture, manager: SessionManager.open(file) };
   }
-  merge(message: unknown) { return this.request("merge", { message }); }
-  abort() { return this.request("abort"); }
+  async merge(message: unknown) { await this.ensureStarted(); return this.request("merge", { message }); }
+  abort() { return this.dormant ? Promise.resolve() : this.request("abort"); }
   subscribe(listener: (event: AgentSessionEvent) => void) {
     this.listeners.add(listener); return () => { this.listeners.delete(listener); };
   }
   dispose() {
     if (this.dead) return;
+    if (!this.process) { this.fail(new Error("BTW closed")); this.resumeConfig = undefined; this.observers.clear(); return; }
     void this.request("dispose").catch(() => {});
     // Extensions may keep sockets/timers alive. Bound shutdown without touching the parent.
     const timer = setTimeout(() => this.process.kill("SIGKILL"), 2000); timer.unref();

@@ -34,6 +34,14 @@ export function forkSnapshot(source: ReadonlySessionManager, cwd: string, partia
 
   // In-flight side effects belong to the parent. Complete their protocol envelopes
   // with explicit snapshot errors, never run them again or pretend they succeeded.
+  const pendingCount = sealPendingCalls(manager, "BTW snapshot boundary: this call had no finalized result at capture time. It may still be executing in the parent session. It was NOT executed or cancelled by BTW; do not repeat side effects without checking.", origin.createdAt);
+  if (partial) manager.appendCustomMessageEntry("pi-btw-inflight", [{ type: "text", text:
+    `Unfinished parent response at snapshot time (observation only, not a completed response or an instruction to execute its tool calls):\n${JSON.stringify(partial)}` }], true);
+  const boundary = manager.appendCustomEntry(ORIGIN, origin);
+  return { manager, origin, boundary, pendingCount };
+}
+
+export function sealPendingCalls(manager: SessionManager, text: string, timestamp = Date.now()) {
   const pending = new Map<string, string>();
   for (const message of manager.buildSessionContext().messages) {
     if (message.role === "assistant") {
@@ -42,12 +50,9 @@ export function forkSnapshot(source: ReadonlySessionManager, cwd: string, partia
   }
   for (const [toolCallId, toolName] of pending) {
     manager.appendMessage({ role: "toolResult", toolCallId, toolName, isError: true,
-      content: [{ type: "text", text: "BTW snapshot boundary: this call had no finalized result at capture time. It may still be executing in the parent session. It was NOT executed or cancelled by BTW; do not repeat side effects without checking." }], timestamp: origin.createdAt });
+      content: [{ type: "text", text }], timestamp });
   }
-  if (partial) manager.appendCustomMessageEntry("pi-btw-inflight", [{ type: "text", text:
-    `Unfinished parent response at snapshot time (observation only, not a completed response or an instruction to execute its tool calls):\n${JSON.stringify(partial)}` }], true);
-  const boundary = manager.appendCustomEntry(ORIGIN, origin);
-  return { manager, origin, boundary, pendingCount: pending.size };
+  return pending.size;
 }
 
 /** Raw entries after the fork boundary: no compaction/projection and no truncation. */

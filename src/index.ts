@@ -4,6 +4,7 @@ import { rawConversation } from "./snapshot.js";
 import { BtwView, type ViewAction } from "./view.js";
 import { mergeContent } from "./merge.js";
 import { Workspace, type Tab } from "./workspace.js";
+import { workspaceFile, saveWorkspace, restoreWorkspace } from "./persistence.js";
 
 export default function btw(pi: ExtensionAPI) {
   const workspace = new Workspace();
@@ -17,14 +18,30 @@ export default function btw(pi: ExtensionAPI) {
   let finish: ((action: ViewAction) => void) | undefined;
   let summaryAbort: AbortController | undefined;
   let menu: "merge" | "close" | undefined;
+  let manifest: string | undefined;
+  let persistenceReady = true;
+  let uiContext: ExtensionContext | undefined;
+  function save() {
+    if (!parentId || !persistenceReady || !workspace.serial) return;
+    view?.saveDraft();
+    try { saveWorkspace(manifest,parentId,workspace); }
+    catch (e) { uiContext?.ui.notify(`BTW save failed: ${String(e)}`,"error"); }
+  }
   const error = (ctx: ExtensionContext, e: unknown) => ctx.ui.notify(String(e),"error");
   function reset() {
+    save();
     generation++; summaryAbort?.abort(); finish?.({kind:"main"}); workspace.dispose(); partial = undefined;
   }
   pi.on("session_start", (_event,ctx) => {
     const id = ctx.sessionManager.getSessionId();
     if (parentId && parentId !== id) reset();
-    parentId = id;
+    parentId = id; uiContext = ctx;
+    manifest = workspaceFile(ctx.sessionManager);
+    persistenceReady = true;
+    if (!workspace.tabs.size) {
+      try { restoreWorkspace(manifest,id,workspace); }
+      catch (e) { persistenceReady = false; error(ctx,e); }
+    }
   });
   pi.on("message_update", event => { partial = event.message; });
   pi.on("message_end", () => { partial = undefined; });
@@ -39,6 +56,7 @@ export default function btw(pi: ExtensionAPI) {
       const child = await startChild(capture);
       if (version !== generation) { child.session.dispose(); return; }
       const tab = workspace.add(child,source);
+      save();
       ctx.ui.notify(`BTW ${tab.id} forked from ${source || "main"}: ${child.manager.getSessionFile()}`,"info");
       if (prompt) void child.session.prompt(prompt).catch(e => error(ctx,e));
     } finally { creating = false; }
@@ -68,6 +86,7 @@ export default function btw(pi: ExtensionAPI) {
       if (destination === 0) pi.sendMessage(message,{triggerTurn:true,deliverAs:"followUp"});
       else await workspace.tabs.get(destination)!.child.session.merge(message);
       tab.merged.set(destination,leaf);
+      save();
       tab.notice = `BTW ${tab.id} merged to ${destination || "main"}`;
       ctx.ui.notify(tab.notice,"info");
     } finally { merging = false; summaryAbort = undefined; }
@@ -76,7 +95,7 @@ export default function btw(pi: ExtensionAPI) {
     const [verb,...rest] = args.trim().split(/\s+/);
     if (verb === "list") {
       const choices = ["main", ...[...workspace.tabs.values()].map(tab =>
-        `BTW ${tab.id} · source ${tab.source || "main"} · ${tab.child.session.closed ? "closed" : tab.child.session.isStreaming ? "running" : "idle"}`)];
+        `BTW ${tab.id} · source ${tab.source || "main"} · ${tab.child.session.closed ? "closed" : tab.child.session.dormant ? "saved" : tab.child.session.isStreaming ? "running" : "idle"}`)];
       const ids = [0, ...workspace.tabs.keys()];
       const choice = await ctx.ui.select("BTW sessions", choices);
       if (choice !== undefined) {
@@ -104,7 +123,7 @@ export default function btw(pi: ExtensionAPI) {
     else if (action.kind === "new") await create(ctx);
     else if (action.kind === "close") {
       if (merging || creating) throw new Error("BTW operation in progress");
-      workspace.close(selected().id);
+      workspace.close(selected().id); save();
     } else if (action.kind === "merge") menu = "merge";
     else await command(action.text || "",ctx);
   }
@@ -115,6 +134,8 @@ export default function btw(pi: ExtensionAPI) {
     try {
       while (workspace.current && version === generation) {
         const tab = selected();
+        try { await tab.child.session.ensureStarted(); } catch (e) { tab.notice = String(e); }
+        if (version !== generation) break;
         const action = await ctx.ui.custom<ViewAction>((tui,theme,_keys,done) => {
           finish = done;
           view = new BtwView(tui,theme,tab,done,async text => {
@@ -126,7 +147,7 @@ export default function btw(pi: ExtensionAPI) {
           menu = undefined;
           return view;
         },{overlay:true,overlayOptions:{width:"100%",maxHeight:"100%",anchor:"top-left",margin:0}});
-        finish = undefined; view = undefined;
+        save(); finish = undefined; view = undefined;
         if (!action || version !== generation) break;
         try { await perform(action,ctx); } catch (e) {
           const current = workspace.tabs.get(workspace.current);

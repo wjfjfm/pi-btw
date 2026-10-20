@@ -34,7 +34,8 @@ export class BtwView {
   get focused() { return this.editor.focused; }
   set focused(value: boolean) { this.editor.focused = value; }
   invalidate() { this.cache = undefined; this.history = undefined; this.editor.invalidate(); }
-  dispose() { this.tab.draft = this.editor.getText(); this.unsubscribe(); }
+  saveDraft() { this.tab.draft = this.editor.getText(); }
+  dispose() { this.saveDraft(); this.unsubscribe(); }
   showMerge() { this.menu = "target"; this.tui.requestRender(); }
   showClose() { this.menu = "close"; this.tui.requestRender(); }
   handleInput(data: string) {
