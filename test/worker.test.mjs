@@ -8,6 +8,7 @@ import { createAssistantMessageEventStream } from '@earendil-works/pi-ai';
 import { forkSnapshot } from '../dist/snapshot.js';
 import { startChild } from '../dist/child.js';
 import btw from '../dist/index.js';
+import {hasMergeReceipt} from '../dist/merge-receipt.js';
 import {Workspace} from '../dist/workspace.js';
 import {saveWorkspace,restoreWorkspace,workspaceFile} from '../dist/persistence.js';
 
@@ -79,7 +80,10 @@ test('extension merges only explicitly, queues follow-up, prevents duplicates, a
     getThinkingLevel:() => 'off', getActiveTools:() => capture.tools,
     getAllTools:() => capture.tools.map(name => ({name, sourceInfo:{path:'builtin:'+name}})),
     getCommands:() => [{source:'extension',sourceInfo:{path:capture.extensionPaths[0]}}],
-    sendMessage:(message, options) => sent.push({message,options}),
+    sendMessage:(message, options) => {
+      sent.push({message,options});
+      parent.appendCustomMessageEntry(message.customType,message.content,message.display,message.details);
+    },
   };
   let summaryRaw, selection, listSelection;
   const choose=async () => undefined;
@@ -151,9 +155,17 @@ test('extension merges only explicitly, queues follow-up, prevents duplicates, a
   await command('merge');
   assert.match(notices.at(-1).message,/delivery failed/);
   assert.ok(JSON.parse(await readFile(workspaceFile(parent),'utf8')).tabs.some(tab=>tab.id===1));
-  pi.sendMessage=deliver;
+  // Queue acceptance alone must NOT mark merged or close the source.
+  let queued;
+  pi.sendMessage=(message,options)=>{queued={message,options};sent.push(queued);};
   await command('merge');
   assert.equal(sent.length,3,JSON.stringify(notices));
+  assert.match(notices.at(-1).message,/waiting for target receipt/);
+  assert.ok(JSON.parse(await readFile(workspaceFile(parent),'utf8')).tabs.some(tab=>tab.id===1));
+  await command('merge');assert.equal(sent.length,3,'pending delivery prevents duplicate sends');
+  parent.appendCustomMessageEntry(queued.message.customType,queued.message.content,true,queued.message.details);
+  await new Promise(r=>setTimeout(r,650));
+  pi.sendMessage=deliver;
   const afterClose=JSON.parse(await readFile(workspaceFile(parent),'utf8'));
   assert.ok(!afterClose.tabs.some(tab=>tab.id===1));
   assert.ok(afterClose.tabs.some(tab=>tab.id===2));
@@ -192,9 +204,13 @@ test('fork while a real parent SDK tool is running never waits for or aborts the
   assert.equal(parent.getSessionId(),originalId); assert.equal(parent.getLeafId(),originalLeaf);
   child.session.dispose();
   assert.equal(session.isStreaming,true);
+  await session.sendCustomMessage({customType:'pi-btw-merge',content:'queued merge during main tool',display:true,details:{mergeId:'busy-main-receipt'}},{triggerTurn:true,deliverAs:'followUp'});
+  assert.equal(hasMergeReceipt(parent.getSessionFile(),'busy-main-receipt'),false,'queue acknowledgement is not delivery');
   release();await running;
   assert.equal(session.isStreaming,false);
-  assert.equal(calls,2);
+  assert.equal(calls,3);
+  assert.equal(hasMergeReceipt(parent.getSessionFile(),'busy-main-receipt'),true);
+  assert.match(JSON.stringify(session.messages),/queued merge during main tool/);
 });
 
 test('nested BTW captures current child state, runs independently, and explicitly merges to source', {timeout:30000}, async t => {

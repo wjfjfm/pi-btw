@@ -1,0 +1,32 @@
+import assert from 'node:assert/strict';
+import {test} from 'node:test';
+import {mkdtempSync,rmSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {SessionManager} from '@earendil-works/pi-coding-agent';
+import {hasMergeReceipt,watchMergeReceipt} from '../dist/merge-receipt.js';
+test('receipt requires matching ID in persisted target active branch',t=>{
+  const dir=mkdtempSync(join(tmpdir(),'btw-receipt-'));t.after(()=>rmSync(dir,{recursive:true,force:true}));
+  const manager=SessionManager.create(dir,dir);
+  const root=manager.appendMessage({role:'user',content:'main',timestamp:1});
+  manager.appendMessage({role:'assistant',content:[{type:'text',text:'reply'}],timestamp:2});
+  const file=manager.getSessionFile();
+  assert.equal(hasMergeReceipt(file,'merge-1'),false);
+  manager.appendCustomMessageEntry('pi-btw-merge','payload',true,{mergeId:'merge-1'});
+  assert.equal(hasMergeReceipt(file,'merge-1'),true);
+  assert.equal(hasMergeReceipt(file,'merge-2'),false);
+  manager.branch(root);
+  manager.appendMessage({role:'user',content:'different branch',timestamp:3});
+  assert.equal(hasMergeReceipt(file,'merge-1'),false);
+  assert.equal(hasMergeReceipt(undefined,'merge-1'),false);
+});
+test('watcher confirms once, times out without success, and cancels on shutdown',async()=>{
+  const results=[];let received=false;
+  watchMergeReceipt(()=>received,value=>results.push(value),100,5);
+  await new Promise(r=>setTimeout(r,15));assert.deepEqual(results,[]);
+  received=true;await new Promise(r=>setTimeout(r,20));assert.deepEqual(results,[true]);
+  watchMergeReceipt(()=>false,value=>results.push(value),10,5);
+  await new Promise(r=>setTimeout(r,30));assert.deepEqual(results,[true,false]);
+  const cancel=watchMergeReceipt(()=>true,value=>results.push(value),10,5);cancel();
+  await new Promise(r=>setTimeout(r,20));assert.deepEqual(results,[true,false]);
+});

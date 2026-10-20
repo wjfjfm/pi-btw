@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+import { hasMergeReceipt, watchMergeReceipt } from "./merge-receipt.js";
 import { SessionManager, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { captureChild, startChild } from "./child.js";
 import { rawConversation } from "./snapshot.js";
@@ -10,6 +12,7 @@ import { workspaceFile, saveWorkspace, restoreWorkspace } from "./persistence.js
 
 export default function btw(pi: ExtensionAPI) {
   const workspace = new Workspace();
+  const pendingMerges = new Map<string,() => void>();
   let partial: unknown;
   let generation = 0;
   let parentId: string | undefined;
@@ -32,6 +35,8 @@ export default function btw(pi: ExtensionAPI) {
   const error = (ctx: ExtensionContext, e: unknown) => ctx.ui.notify(String(e),"error");
   function reset() {
     save();
+    for (const cancel of pendingMerges.values()) cancel();
+    pendingMerges.clear();
     generation++; summaryAbort?.abort(); finish?.({kind:"main"}); workspace.dispose(); partial = undefined;
   }
   pi.on("session_start", (_event,ctx) => {
@@ -87,6 +92,8 @@ export default function btw(pi: ExtensionAPI) {
   async function merge(tab: Tab, options: MergeOptions, ctx: ExtensionContext) {
     const {destination} = options;
     const mode = mergeMode(options);
+    const pendingKey = `${tab.id}:${destination}`;
+    if (pendingMerges.has(pendingKey)) throw new Error("Merge queued; waiting for target receipt");
     if (workspace.tabs.get(tab.id) !== tab) throw new Error("Source BTW is closed");
     if (merging || tab.child.session.isStreaming) throw new Error("Wait until BTW is idle before merging");
     if (tab.child.session.closed) throw new Error("BTW process is closed");
@@ -101,16 +108,42 @@ export default function btw(pi: ExtensionAPI) {
       const content = await mergeContent(rawConversation(manager,tab.child.boundary),mode,ctx,summaryAbort.signal);
       if (version !== generation || ctx.sessionManager.getSessionId() !== parentId) throw new Error("Main session changed; merge cancelled");
       requireDestination(destination,tab.id);
+      const mergeId = randomUUID();
+      const targetFile = destination === 0 ? ctx.sessionManager.getSessionFile()
+        : workspace.tabs.get(destination)!.child.manager.getSessionFile();
       const message = {customType:"pi-btw-merge",display:true,
         content:`BTW ${MERGE_MODES.find(option => option.id === mode)!.label} — explicit user merge\nSession: ${manager.getSessionFile()}\n\n${content}`,
-        details:{sessionId:manager.getSessionId(),mode,leaf,options}};
+        details:{sessionId:manager.getSessionId(),mode,leaf,options,mergeId}};
       if (destination === 0) pi.sendMessage(message,{triggerTurn:true,deliverAs:"followUp"});
       else await workspace.tabs.get(destination)!.child.session.merge(message);
-      tab.merged.set(destination,leaf);
-      if (options.close) workspace.close(tab.id);
-      save();
-      tab.notice = `BTW ${tab.id} merged to ${destination || "main"}`;
-      ctx.ui.notify(tab.notice,"info");
+      const settle = (received: boolean) => {
+        pendingMerges.delete(pendingKey);
+        if (version !== generation || workspace.tabs.get(tab.id) !== tab) return;
+        if (!received) {
+          tab.notice = `BTW ${tab.id}: merge receipt timed out; source retained. Target may still be queued; check before retrying.`;
+          ctx.ui.notify(tab.notice,"warning");
+          return;
+        }
+        tab.merged.set(destination,leaf);
+        // The source may have continued while main was draining its queue.
+        let unchanged = false;
+        try { unchanged = SessionManager.open(manager.getSessionFile()!).getLeafId() === leaf; } catch {}
+        if (workspace.current === tab.id) view?.saveDraft();
+        const canClose = options.close && unchanged && !tab.child.session.isStreaming && !tab.draft.trim();
+        tab.notice = `BTW ${tab.id} merge confirmed in ${destination || "main"}${options.close && !canClose ? "; source retained (new activity or draft)" : ""}`;
+        if (canClose) {
+          if (workspace.current === tab.id) finish?.({kind:"main"});
+          workspace.close(tab.id);
+        }
+        save();
+        ctx.ui.notify(tab.notice,"info");
+      };
+      if (hasMergeReceipt(targetFile,mergeId)) settle(true);
+      else {
+        tab.notice = `BTW ${tab.id}: merge queued; waiting for target receipt (source retained)`;
+        ctx.ui.notify(tab.notice,"info");
+        pendingMerges.set(pendingKey,watchMergeReceipt(() => hasMergeReceipt(targetFile,mergeId),settle));
+      }
     } finally { merging = false; summaryAbort = undefined; }
   }
   async function command(args: string, ctx: ExtensionContext) {
