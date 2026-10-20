@@ -37,9 +37,11 @@ test('native assistant displays fetch errors even without text, and renders stre
 });
 test('bidirectional shortcuts, merge target/mode menu and close confirmation',()=>{
   const f=fixture();
-  f.view.handleInput('\x1b[98;7u');assert.equal(f.actions.at(-1).kind,'prev');
-  f.view.handleInput('\x1b[102;7u');assert.equal(f.actions.at(-1).kind,'next');
-  f.view.handleInput('\x1b[110;7u');assert.equal(f.actions.at(-1).kind,'new');
+  f.view.handleInput('\x02');assert.equal(f.actions.at(-1).kind,'prev');
+  f.view.handleInput('\x06');assert.equal(f.actions.at(-1).kind,'next');
+  const before=f.actions.length;
+  for(const key of ['\x1b[110;7u','\x1b[109;7u','\x1b[120;7u'])f.view.handleInput(key);
+  assert.equal(f.actions.length,before);
   f.view.showMerge();f.view.handleInput('m');f.view.handleInput('s');
   assert.deepEqual(f.actions.at(-1),{kind:'command',text:'merge main summary'});
   f.view.showClose();const n=f.actions.length;f.view.handleInput('n');assert.equal(f.actions.length,n);

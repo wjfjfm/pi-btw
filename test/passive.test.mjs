@@ -8,8 +8,9 @@ import { createAssistantMessageEventStream } from '@earendil-works/pi-ai';
 import btw from '../dist/index.js';
 
 test('unused BTW registers no model-facing hooks or tools', () => {
-  const events=[];
-  btw({on:name=>events.push(name),registerCommand:()=>{},registerShortcut:()=>{}});
+  const events=[],shortcuts=[];
+  btw({on:name=>events.push(name),registerCommand:()=>{},registerShortcut:key=>shortcuts.push(key)});
+  assert.deepEqual(shortcuts,['ctrl+b','ctrl+f']);
   assert.deepEqual(events,['session_start','message_update','message_end','session_shutdown']);
 });
 

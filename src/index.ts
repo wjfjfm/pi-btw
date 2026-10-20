@@ -45,7 +45,7 @@ export default function btw(pi: ExtensionAPI) {
   }
   function selected() {
     const tab = workspace.tabs.get(workspace.current);
-    if (!tab) throw new Error("Select a BTW first using Ctrl+Alt+B/F");
+    if (!tab) throw new Error("Select a BTW first using Ctrl+B/F or /btw list");
     return tab;
   }
   async function merge(tab: Tab, target: "source" | "main", mode: string, ctx: ExtensionContext) {
@@ -74,6 +74,17 @@ export default function btw(pi: ExtensionAPI) {
   }
   async function command(args: string, ctx: ExtensionContext) {
     const [verb,...rest] = args.trim().split(/\s+/);
+    if (verb === "list") {
+      const choices = ["main", ...[...workspace.tabs.values()].map(tab =>
+        `BTW ${tab.id} · source ${tab.source || "main"} · ${tab.child.session.closed ? "closed" : tab.child.session.isStreaming ? "running" : "idle"}`)];
+      const ids = [0, ...workspace.tabs.keys()];
+      const choice = await ctx.ui.select("BTW sessions", choices);
+      if (choice !== undefined) {
+        const index = choices.indexOf(choice);
+        if (index >= 0) workspace.current = ids[index];
+      }
+      return;
+    }
     if (verb === "next" || verb === "prev") { workspace.move(verb === "next" ? 1 : -1); return; }
     if (verb === "close") { if (merging || creating) throw new Error("BTW operation in progress"); selected(); menu = "close"; return; }
     if (verb === "merge") {
@@ -133,14 +144,8 @@ export default function btw(pi: ExtensionAPI) {
       await perform(action,ctx); await show(ctx);
     } catch (e) { error(ctx,e); }
   }
-  pi.registerCommand("btw",{description:"Fork BTW | next | prev | merge [source|main] full|summary | close",
+  pi.registerCommand("btw",{description:"Fork BTW | list | next | prev | merge [source|main] full|summary | close",
     handler:async (args,ctx) => { await run(ctx,{kind:"command",text:args}); }});
-  for (const [key,kind] of [["ctrl+alt+b","prev"],["ctrl+alt+f","next"],["ctrl+alt+n","new"]] as const)
+  for (const [key,kind] of [["ctrl+b","prev"],["ctrl+f","next"]] as const)
     pi.registerShortcut(key,{description:`BTW ${kind}`,handler:async ctx => { await run(ctx,{kind}); }});
-  pi.registerShortcut("ctrl+alt+m",{description:"Merge current BTW",handler:async ctx => {
-    if (view) view.showMerge(); else ctx.ui.notify("Select a BTW first using Ctrl+Alt+B/F","info");
-  }});
-  pi.registerShortcut("ctrl+alt+x",{description:"Close current BTW",handler:async ctx => {
-    if (view) view.showClose(); else ctx.ui.notify("Select a BTW first using Ctrl+Alt+B/F","info");
-  }});
 }

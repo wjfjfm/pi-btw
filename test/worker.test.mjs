@@ -100,6 +100,22 @@ test('extension merges only explicitly, queues follow-up, prevents duplicates, a
   assert.equal(sent.length, 2, JSON.stringify(notices));
   assert.match(sent[1].message.content, /merged summary/);
   assert.match(summaryRaw, /second question/);
+  ctx.ui.select=async (title,choices)=>{
+    assert.equal(title,'BTW sessions');
+    assert.deepEqual(choices,['main','BTW 1 · source main · idle','BTW 2 · source 1 · idle']);
+    return choices[0];
+  };
+  await command('list');
+  await command('merge full');
+  assert.match(notices.at(-1).message,/Select a BTW/);
+  ctx.ui.select=async (_title,choices)=>choices[1];
+  await command('list');
+  await command('merge full');
+  assert.match(notices.at(-1).message,/already been merged/);
+  ctx.ui.select=async()=>undefined;
+  await command('list');
+  await command('merge full');
+  assert.match(notices.at(-1).message,/already been merged/);
   await command('close');
 });
 

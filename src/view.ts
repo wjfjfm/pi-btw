@@ -4,7 +4,7 @@ import { Editor, Text, matchesKey, truncateToWidth, wrapTextWithAnsi, type Compo
 import type { Tab } from "./workspace.js";
 
 export type ViewAction = { kind: "next" | "prev" | "main" | "new" | "close" | "merge" | "command"; text?: string };
-export const HELP = "Ctrl+Alt: B prev · F next · N new · M merge · X close | Esc main | Ctrl+C stop | PgUp/PgDn scroll";
+export const HELP = "Ctrl+B prev · Ctrl+F next · Esc main | /btw · /btw list · /btw merge · /btw close";
 
 /** Pi's native message components, bounded to the overlay viewport. */
 export class BtwView {
@@ -45,10 +45,8 @@ export class BtwView {
       else if (this.menu === "mode" && (data === "f" || data === "s")) this.action({kind:"command",text:`merge ${this.destination} ${data === "f" ? "full" : "summary"}`});
       this.tui.requestRender(); return;
     }
-    for (const [key,kind] of [["ctrl+alt+b","prev"],["ctrl+alt+f","next"],["ctrl+alt+n","new"],["escape","main"]] as const)
+    for (const [key,kind] of [["ctrl+b","prev"],["ctrl+f","next"],["escape","main"]] as const)
       if (matchesKey(data,key)) { this.action({kind}); return; }
-    if (matchesKey(data,"ctrl+alt+m")) { this.showMerge(); return; }
-    if (matchesKey(data,"ctrl+alt+x")) { this.showClose(); return; }
     if (matchesKey(data,"ctrl+c")) {
       void this.tab.child.session.abort().catch(error => { this.error = String(error); this.tui.requestRender(); }); return;
     }

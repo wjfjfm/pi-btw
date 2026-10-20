@@ -24,20 +24,20 @@ pi -e /path/to/pi-btw/src/index.ts
 
 | 快捷键 | 操作 |
 | --- | --- |
-| `Ctrl+Alt+B` | 上一个会话 |
-| `Ctrl+Alt+F` | 下一个会话 |
-| `Ctrl+Alt+N` | 从当前会话新建 BTW |
-| `Ctrl+Alt+M` | 选择 merge 到 source/main，再选择原文/summary |
-| `Ctrl+Alt+X` | 确认后关闭当前 BTW |
+| `Ctrl+B` | 上一个会话 |
+| `Ctrl+F` | 下一个会话 |
 | `Esc` | 回到主界面；菜单中取消菜单 |
 | BTW 内 `Ctrl+C` | 仅取消当前 BTW 执行 |
 | `PageUp` / `PageDown` | 滚动当前 BTW 对话 |
 
-前后切换按创建顺序循环，包含主会话。快捷键显示在 BTW 底栏，需要终端支持相应按键编码。
+前后切换按创建顺序循环，包含主会话。BTW 专用快捷键仅前后切换和 Esc，显示在底栏。`Ctrl+B/F` 占用原来的左右移光标快捷键，仍可使用方向键。新建、合并和关闭使用命令。若 tmux 使用默认 `Ctrl+B` 前缀，按两次 `Ctrl+B` 才会将该按键发送给 Pi；也可用 `/btw prev`。
+
+`/btw list` 列出 main 和全部 BTW 的来源、运行状态；选择后切换，取消则留在当前会话。
 
 在当前 BTW 中也可使用：
 
 ```text
+/btw list
 /btw next
 /btw prev
 /btw merge
