@@ -66,10 +66,23 @@ export default function btw(pi: ExtensionAPI) {
     if (!tab) throw new Error("Select a BTW first using Ctrl+B/F or /btw list");
     return tab;
   }
-  async function merge(tab: Tab, target: "source" | "main", mode: string, ctx: ExtensionContext) {
+  function requireDestination(id: number, source: number) {
+    if (id === source) throw new Error("Cannot merge a BTW into itself");
+    if (id && (!workspace.tabs.has(id) || workspace.tabs.get(id)!.child.session.closed))
+      throw new Error("Target BTW is closed");
+  }
+  async function chooseMerge(tab: Tab, destination: number, ctx: ExtensionContext) {
+    requireDestination(destination,tab.id);
+    const version = generation;
+    const choice = await ctx.ui.select(`Merge BTW ${tab.id} to ${destination ? `BTW ${destination}` : "main"}`,MERGE_MODES.map(option => option.label));
+    const mode = MERGE_MODES.find(option => option.label === choice)?.id;
+    if (!mode || version !== generation) return;
+    await merge(tab,destination,mode,ctx);
+  }
+  async function merge(tab: Tab, destination: number, mode: string, ctx: ExtensionContext) {
     if (merging || tab.child.session.isStreaming) throw new Error("Wait until BTW is idle before merging");
     if (tab.child.session.closed) throw new Error("BTW process is closed");
-    const destination = workspace.destination(tab,target);
+    requireDestination(destination,tab.id);
     const manager = SessionManager.open(tab.child.manager.getSessionFile()!);
     const leaf = manager.getLeafId();
     if (tab.merged.has(destination) && tab.merged.get(destination) === leaf) throw new Error("This BTW revision has already been merged to this target");
@@ -79,7 +92,7 @@ export default function btw(pi: ExtensionAPI) {
       summaryAbort = new AbortController();
       const content = await mergeContent(rawConversation(manager,tab.child.boundary),mode,ctx,summaryAbort.signal);
       if (version !== generation || ctx.sessionManager.getSessionId() !== parentId) throw new Error("Main session changed; merge cancelled");
-      workspace.destination(tab,target);
+      requireDestination(destination,tab.id);
       const message = {customType:"pi-btw-merge",display:true,
         content:`BTW ${MERGE_MODES.find(option => option.id === mode)!.label} — explicit user merge\nSession: ${manager.getSessionFile()}\n\n${content}`,
         details:{sessionId:manager.getSessionId(),mode,leaf}};
@@ -95,9 +108,26 @@ export default function btw(pi: ExtensionAPI) {
     const [verb,...rest] = args.trim().split(/\s+/);
     if (verb === "list") {
       const rows = workspace.listRows();
-      const choices = rows.map(row => row.label);
+      const choices = [...rows.map(row => row.label),"Merge…"];
       const ids = rows.map(row => row.id);
+      const version = generation;
       const choice = await ctx.ui.select("BTW sessions", choices);
+      if (version !== generation) return;
+      if (choice === "Merge…") {
+        const sources = rows.filter(row => row.id && !workspace.tabs.get(row.id)!.child.session.closed);
+        if (!sources.length) throw new Error("No BTW sessions to merge");
+        const from = await ctx.ui.select("Merge from",sources.map(row => row.label));
+        const sourceId = sources.find(row => row.label === from)?.id;
+        if (sourceId === undefined || version !== generation) return;
+        const tab = workspace.tabs.get(sourceId);
+        if (!tab) throw new Error("Source BTW is closed");
+        const targets = workspace.listRows().filter(row => row.id !== sourceId && (!row.id || !workspace.tabs.get(row.id)!.child.session.closed));
+        const to = await ctx.ui.select(`Merge BTW ${sourceId} to`,targets.map(row => row.label));
+        const destination = targets.find(row => row.label === to)?.id;
+        if (destination === undefined || version !== generation) return;
+        await chooseMerge(tab,destination,ctx);
+        return;
+      }
       if (choice !== undefined) {
         const index = choices.indexOf(choice);
         if (index >= 0) workspace.current = ids[index];
@@ -111,11 +141,7 @@ export default function btw(pi: ExtensionAPI) {
       if (rest.length > 1 || (rest.length && !["source","main"].includes(rest[0])))
         throw new Error("Use /btw merge [source|main], then choose a merge mode");
       const target = rest[0] === "source" ? "source" : "main";
-      const version = generation;
-      const choice = await ctx.ui.select(`Merge BTW ${tab.id} to ${target}`,MERGE_MODES.map(option => option.label));
-      const mode = MERGE_MODES.find(option => option.label === choice)?.id;
-      if (!mode || version !== generation) return;
-      await merge(tab,target,mode,ctx); return;
+      await chooseMerge(tab,workspace.destination(tab,target),ctx); return;
     }
     if (verb === "new") { await create(ctx,rest.join(" ") || undefined); return; }
     await create(ctx,args.trim() || undefined);

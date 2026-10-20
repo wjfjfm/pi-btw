@@ -34,6 +34,8 @@ pi -e /path/to/pi-btw/src/index.ts
 
 `/btw list` 按 source 关系树状显示 main 和全部 BTW，标注来源、运行状态；选择后切换，取消则留在当前会话。来源已关闭的分支仍列出，并标注 `(closed)`。
 
+列表末尾的 `Merge…` 提供完整流程：选择要合并的 BTW → 选择目标（main 或其他可用 BTW，不包括自身）→ 选择四种合并方式之一。任一步取消都不合并，结束后保留原来的焦点。
+
 在当前 BTW 中也可使用：
 
 ```text
@@ -77,7 +79,7 @@ SDK 子进程显式初始化 Pi 的 HTTP 代理及超时配置，支持环境变
 
 完整模式包含 fork 后当前分支的完整原文 JSONL，不截断，保留新增消息、工具结果、图片原始数据及摘要记录，不重复包含 fork 前历史。conversation 使用过滤后的 JSONL 保存正文与图片，不额外请求模型。两种带 summary 的模式复用 Pi `/tree` 的 `generateBranchSummary()`，使用原生 prompt、预算和文件清单策略；原生摘要预处理省略工具结果，并可能按预算舍弃较旧消息。摘要失败或取消不合并。
 
-合并以可见 custom message 发送，使用 follow-up 排队，不中断目标任务。每个目标分别防止同一 revision 重复合并；后续合并包含 fork 后全部对话，而非增量。合并后不关闭 BTW。
+合并以可见 custom message 发送，使用 follow-up 排队，不中断目标任务。每个目标分别防止同一 revision 重复合并；后续合并包含 fork 后全部对话，而非增量。所有合并方式都保留原始 BTW：不关闭、不删除、不修改其原始对话，也不自动切换到目标。
 
 ## 当前边界
 

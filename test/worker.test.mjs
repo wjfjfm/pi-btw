@@ -124,7 +124,7 @@ test('extension merges only explicitly, queues follow-up, prevents duplicates, a
   assert.match(summaryRaw, /second question/);
   ctx.ui.select=async (title,choices)=>{
     assert.equal(title,'BTW sessions');
-    assert.deepEqual(choices,['main','└─ BTW 1 · source main · idle','   └─ BTW 2 · source 1 · idle']);
+    assert.deepEqual(choices,['main','└─ BTW 1 · source main · idle','   └─ BTW 2 · source 1 · idle','Merge…']);
     return choices[0];
   };
   await command('list');
@@ -140,7 +140,39 @@ test('extension merges only explicitly, queues follow-up, prevents duplicates, a
   const count=sent.length;
   await command('merge');
   assert.equal(sent.length,count);
-  await command('close');
+  await command('prev'); // return to main without closing either BTW
+  const saved=JSON.parse(await readFile(workspaceFile(parent),'utf8'));
+  const originalBtwFile=saved.tabs.find(tab=>tab.id===2).capture.file;
+  const originalBtw=await readFile(originalBtwFile,'utf8');
+  let step=0;
+  ctx.ui.select=async(title,choices)=>{
+    step++;
+    if(step===1){assert.equal(title,'BTW sessions');return 'Merge…';}
+    if(step===2){assert.equal(title,'Merge from');return choices.find(label=>label.includes('BTW 2'));}
+    if(step===3){assert.equal(title,'Merge BTW 2 to');assert.ok(!choices.some(label=>label.includes('BTW 2')));return choices.find(label=>label.includes('BTW 1'));}
+    assert.equal(title,'Merge BTW 2 to BTW 1');return 'conversation';
+  };
+  await command('list');
+  assert.equal(step,4);assert.equal(sent.length,2,'list merge to child must not inject main');
+  const mergedSource=SessionManager.open(forkedFile).getBranch().filter(e=>e.type==='custom_message'&&e.customType==='pi-btw-merge');
+  assert.equal(mergedSource.length,1);assert.equal(mergedSource[0].details.mode,'conversation');
+  assert.equal(await readFile(originalBtwFile,'utf8'),originalBtw,'merge must preserve original BTW');
+  for(const cancelAt of [2,3,4]){
+    let stage=0;
+    ctx.ui.select=async(_title,choices)=>{
+      if(++stage===cancelAt)return undefined;
+      return stage===1?'Merge…':stage===2?choices.find(label=>label.includes('BTW 2')):choices.find(label=>label.includes('BTW 1'));
+    };
+    await command('list');assert.equal(stage,cancelAt);
+    assert.equal(sent.length,2);
+  }
+  ctx.ui.select=async(title,choices)=>{
+    assert.equal(title,'BTW sessions');
+    assert.ok(choices.some(label=>label.includes('BTW 1')));assert.ok(choices.some(label=>label.includes('BTW 2')));
+    return undefined;
+  };
+  await command('list');
+  await command('merge');assert.match(notices.at(-1).message,/Select a BTW/);
 });
 
 test('fork while a real parent SDK tool is running never waits for or aborts the parent', {timeout:30000}, async t => {
