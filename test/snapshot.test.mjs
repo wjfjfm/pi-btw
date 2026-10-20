@@ -64,6 +64,19 @@ test('unfinished calls get explicit snapshot errors only in child, partial strea
   assert.match(JSON.stringify(fork.manager.getEntries()), /partial/);
 });
 
+test('empty streaming envelopes are not injected, but meaningful partial content is retained', t => {
+  const {cwd,parent}=setup(t);
+  parent.appendMessage(user('parent task'));
+  const before=readFileSync(parent.getSessionFile(),'utf8');
+  for(const content of [[],[{type:'thinking',thinking:''}],[{type:'text',text:'  '}],[{type:'thinking',thinking:'\n  '}]] ) {
+    const fork=forkSnapshot(parent,cwd,{role:'assistant',content,stopReason:'pending',responseId:'empty-response'});
+    assert.ok(!fork.manager.getEntries().some(e=>e.customType==='pi-btw-inflight'));
+  }
+  const meaningful=forkSnapshot(parent,cwd,{role:'assistant',content:[{type:'thinking',thinking:'work already in progress'}],stopReason:'pending'});
+  assert.ok(meaningful.manager.getEntries().some(e=>e.customType==='pi-btw-inflight'));
+  assert.equal(readFileSync(parent.getSessionFile(),'utf8'),before);
+});
+
 test('empty and unflushed in-memory sessions fork into durable independent files', t => {
   const { cwd } = setup(t);
   const parent = SessionManager.inMemory(cwd);

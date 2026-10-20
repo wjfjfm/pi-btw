@@ -97,7 +97,13 @@ test('extension merges only explicitly, queues follow-up, prevents duplicates, a
   const command = args => commands.get('btw')(args, ctx);
   assert.equal(sent.length, 0);
   await command('first question');
+  const forkedFile=notices.at(-1).message.match(/: (.*)$/)[1];
   await new Promise(r => setTimeout(r, 500));
+  const forked=SessionManager.open(forkedFile);
+  const firstPrompts=forked.buildSessionContext().messages.filter(m=>m.role==='user'&&JSON.stringify(m.content).includes('first question'));
+  assert.equal(firstPrompts.length,1,'/btw <question> submits the initial question exactly once');
+  assert.match(JSON.stringify(forked.buildSessionContext().messages),/child reply/);
+  assert.doesNotMatch(await readFile(parent.getSessionFile(),'utf8'),/first question/);
   await command('merge');
   assert.equal(sent.length,0,'cancelling must not merge');
   selection='full conversation with thinking and toolcall';
