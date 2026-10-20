@@ -17,6 +17,11 @@ test('full merge preserves exact raw contents and makes no model call', async ()
   const original = '{"text":"原文\\nexact","image":"AAAA"}\n';
   assert.equal(await mergeContent(original, 'full', {}), original);
 });
+test('summary plus Full preserves raw transcript after summary', async () => {
+  const result=await mergeContent(raw,'summary-with-full',context());
+  assert.match(result,/## Summary/);
+  assert.ok(result.endsWith(raw));
+});
 test('summary uses native tree prompt, budget and abort signal', async () => {
   const controller = new AbortController();
   const ctx=context('stop','summary',(messages,options)=>{

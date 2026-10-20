@@ -36,7 +36,7 @@ pi -e /path/to/pi-btw/src/index.ts
 
 会话列表及 merge 的来源/目标列表，在会话信息同一行后方，以暗色显示“第一条 … 最新一条”正文预览，不添加首/末标签。BTW 只取派生后的对话，不混入继承历史；不显示 thinking 或工具输出，不调用模型。长内容截短显示，原始对话不变。
 
-列表末尾的 `Merge…` 提供完整流程：选择要合并的 BTW → 选择目标（main 或其他可用 BTW，不包括自身）→ 选择四种合并方式之一。任一步取消都不合并，结束后保留原来的焦点。
+列表末尾的 `Merge…`：选择要合并的 BTW 后，进入与 `/btw merge` 相同的选项弹窗。目标可选 main 或其他可用 BTW，不包括自身。任一步取消都不合并。
 
 在当前 BTW 中也可使用：
 
@@ -50,14 +50,25 @@ pi -e /path/to/pi-btw/src/index.ts
 /btw close
 ```
 
-`/btw merge` 默认目标为 main；只有显式 `/btw merge source` 才合并到直接来源。每次合并都要求用户选择模式，取消不会注入任何内容，不再支持直接在命令中指定 `full`/`summary` 绕过选择。
+`/btw merge` 打开统一弹窗；`/btw merge source` 仅将目标预设为直接来源，仍须确认。
 
-| 模式 | 内容 |
-| --- | --- |
-| summary | 仅原生 tree 摘要 |
-| conversation | 用户/助手对话正文、图片及可见 custom 消息；不含 thinking、工具调用与结果 |
-| summary with conversation | 摘要＋上述 conversation |
-| full conversation with thinking and toolcall | 完整原文，含保存的 thinking、工具调用及结果 |不提供 `/merge` 或 `/main` 命令。主界面要合并/关闭已有 BTW，请先切换到它。
+```text
+Merge to:           main
+Close current btw:  Yes
+Summary:            Yes
+Conversation:       Strip
+
+[OK]  Cancel
+```
+
+默认聚焦 OK，下一个为 Cancel，再依次进入四个字段。Tab / ↑↓ 移动焦点，←→ 修改值，Enter 确认按钮或切换字段，Esc 取消。每次打开恢复上述默认值。
+
+- **Close current btw**：成功投递后关闭所选源 BTW 并从列表移除，保留会话文件与其后代；No 则保留源 BTW。
+- **Summary**：Yes 使用原生 tree 摘要，No 不请求摘要模型。
+- **Conversation**：Full 保留完整原文（含 thinking、工具调用与结果）；Strip 仅保留用户/助手正文、图片及可见 custom 消息；None 不附对话。
+- Summary No + Conversation None 没有可合并内容，弹窗会阻止确认。取消、摘要失败或投递失败均不关闭源 BTW。
+
+不提供 `/merge` 或 `/main` 命令。主界面可通过 `/btw list → Merge…` 合并已有 BTW。
 
 `source` 是直接来源；`main` 是最初主会话。关闭只结束当前 BTW，不关闭其后代。source 已关闭时，合并到 source 明确报错，仍可合并到 main。关闭保留 session 文件。
 
@@ -83,9 +94,9 @@ SDK 子进程显式初始化 Pi 的 HTTP 代理及超时配置，支持环境变
 
 运行中也可以 fork。未完成工具在子会话内补明确的快照边界错误结果，不重放、不取消源工具；未完成流式响应作为观察记录附加到子会话。
 
-完整模式包含 fork 后当前分支的完整原文 JSONL，不截断，保留新增消息、工具结果、图片原始数据及摘要记录，不重复包含 fork 前历史。conversation 使用过滤后的 JSONL 保存正文与图片，不额外请求模型。两种带 summary 的模式复用 Pi `/tree` 的 `generateBranchSummary()`，使用原生 prompt、预算和文件清单策略；原生摘要预处理省略工具结果，并可能按预算舍弃较旧消息。摘要失败或取消不合并。
+完整模式包含 fork 后当前分支的完整原文 JSONL，不截断，保留新增消息、工具结果、图片原始数据及摘要记录，不重复包含 fork 前历史。conversation 使用过滤后的 JSONL 保存正文与图片，不额外请求模型。Summary Yes 复用 Pi `/tree` 的 `generateBranchSummary()`，使用原生 prompt、预算和文件清单策略；原生摘要预处理省略工具结果，并可能按预算舍弃较旧消息。摘要失败或取消不合并。
 
-合并以可见 custom message 发送，使用 follow-up 排队，不中断目标任务。每个目标分别防止同一 revision 重复合并；后续合并包含 fork 后全部对话，而非增量。所有合并方式都保留原始 BTW：不关闭、不删除、不修改其原始对话，也不自动切换到目标。
+合并以可见 custom message 发送，使用 follow-up 排队，不中断目标任务。每个目标分别防止同一 revision 重复合并；后续合并包含 fork 后全部对话，而非增量。不修改或删除原始对话文件，也不自动切换到目标。Close current btw 默认 Yes；关闭当前焦点 BTW 时，按普通 close 规则回到上一个会话，否则保留原焦点。
 
 ## 当前边界
 

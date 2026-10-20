@@ -5,6 +5,7 @@ export const MERGE_MODES = [
   {id:"conversation",label:"conversation"},
   {id:"summary-with-conversation",label:"summary with conversation"},
   {id:"full",label:"full conversation with thinking and toolcall"},
+  {id:"summary-with-full",label:"summary with full conversation"},
 ] as const;
 
 /** Preserve dialogue text/images, not hidden reasoning or tool protocol. */
@@ -45,5 +46,6 @@ export async function mergeContent(raw: string, mode: string, ctx: Pick<Extensio
   if (result.aborted) throw new Error("Summary aborted; nothing merged");
   if (result.error) throw new Error(result.error);
   if (!hasSummaryText || !result.summary?.trim()) throw new Error("Empty summary; nothing merged");
-  return mode === "summary-with-conversation" ? `## Summary\n\n${result.summary}\n\n## Conversation (JSONL)\n\n${dialogue}` : result.summary;
+  if (mode === "summary") return result.summary;
+  return `## Summary\n\n${result.summary}\n\n## Conversation (JSONL)\n\n${mode === "summary-with-full" ? raw : dialogue}`;
 }

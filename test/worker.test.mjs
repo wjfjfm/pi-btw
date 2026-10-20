@@ -82,15 +82,13 @@ test('extension merges only explicitly, queues follow-up, prevents duplicates, a
     sendMessage:(message, options) => sent.push({message,options}),
   };
   let summaryRaw, selection;
-  const choose=async (_title,choices)=>{
-    assert.deepEqual(choices,['summary','conversation','summary with conversation','full conversation with thinking and toolcall']);
-    return selection;
-  };
+  const choose=async () => undefined;
+  const dialog=async (_factory,options) => options?.overlayOptions?.width === 76 ? selection : undefined;
   const ctx = {
     mode:'tui', cwd:capture.cwd, model, thinkingLevel:'off', scopedModels:[], sessionManager:parent,
     getSystemPrompt:() => capture.systemPrompt, isProjectTrusted:() => true,
     modelRegistry:{streamSimple:(_model, context) => {summaryRaw=JSON.stringify(context.messages);const stream=createAssistantMessageEventStream();stream.push({type:'done',reason:'stop',message:{stopReason:'stop',content:[{type:'text',text:'merged summary'}]}});stream.end();return stream;}},
-    ui:{select:choose, custom:async () => {}, notify:(message,type) => notices.push({message,type})},
+    ui:{select:choose, custom:dialog, notify:(message,type) => notices.push({message,type})},
   };
   btw(pi); handlers.get('session_start')({}, ctx);
   t.after(() => handlers.get('session_shutdown')());
@@ -106,7 +104,7 @@ test('extension merges only explicitly, queues follow-up, prevents duplicates, a
   assert.doesNotMatch(await readFile(parent.getSessionFile(),'utf8'),/first question/);
   await command('merge');
   assert.equal(sent.length,0,'cancelling must not merge');
-  selection='full conversation with thinking and toolcall';
+  selection={destination:0,close:false,summary:false,conversation:'Full'};
   await command('merge');
   assert.equal(sent.length, 1, JSON.stringify(notices));
   assert.match(sent[0].message.content, /first question/);
@@ -117,7 +115,7 @@ test('extension merges only explicitly, queues follow-up, prevents duplicates, a
   assert.match(notices.at(-1).message, /already been merged/);
   await command('second question');
   await new Promise(r => setTimeout(r, 500));
-  selection='summary';
+  selection={destination:0,close:false,summary:true,conversation:'None'};
   await command('merge');
   assert.equal(sent.length, 2, JSON.stringify(notices));
   assert.match(sent[1].message.content, /merged summary/);
@@ -153,15 +151,19 @@ test('extension merges only explicitly, queues follow-up, prevents duplicates, a
     step++;
     if(step===1){assert.equal(title,'BTW sessions');return 'Merge…';}
     if(step===2){assert.equal(title,'Merge from');return choices.find(label=>label.includes('BTW 2'));}
-    if(step===3){assert.equal(title,'Merge BTW 2 to');assert.ok(!choices.some(label=>label.includes('BTW 2')));return choices.find(label=>label.includes('BTW 1'));}
-    assert.equal(title,'Merge BTW 2 to BTW 1');return 'conversation';
+    assert.fail('target and options must use the unified dialog');
   };
+  selection={destination:1,close:false,summary:false,conversation:'Strip'};
   await command('list');
-  assert.equal(step,4);assert.equal(sent.length,2,'list merge to child must not inject main');
+  assert.equal(step,2);assert.equal(sent.length,2,'list merge to child must not inject main');
   const mergedSource=SessionManager.open(forkedFile).getBranch().filter(e=>e.type==='custom_message'&&e.customType==='pi-btw-merge');
   assert.equal(mergedSource.length,1);assert.equal(mergedSource[0].details.mode,'conversation');
   assert.equal(await readFile(originalBtwFile,'utf8'),originalBtw,'merge must preserve original BTW');
-  for(const cancelAt of [2,3,4]){
+  for(const cancelAt of [2,3]){
+    selection=undefined;
+    ctx.ui.custom=async(factory,options)=>{
+      if(options?.overlayOptions?.width===76){stage++;return undefined;}
+    };
     let stage=0;
     ctx.ui.select=async(_title,choices)=>{
       if(++stage===cancelAt)return undefined;
@@ -177,6 +179,24 @@ test('extension merges only explicitly, queues follow-up, prevents duplicates, a
   };
   await command('list');
   await command('merge');assert.match(notices.at(-1).message,/Select a BTW/);
+  // Default close is applied only after delivery, removes the manifest item, and preserves the file.
+  ctx.ui.custom=dialog;
+  selection={destination:0,close:true,summary:false,conversation:'Full'};
+  ctx.ui.select=async(_title,choices)=>choices.find(label=>label.includes('BTW 1'));
+  await command('list');
+  await new Promise(r=>setTimeout(r,500));
+  const deliver=pi.sendMessage;
+  pi.sendMessage=()=>{throw new Error('delivery failed');};
+  await command('merge');
+  assert.match(notices.at(-1).message,/delivery failed/);
+  assert.ok(JSON.parse(await readFile(workspaceFile(parent),'utf8')).tabs.some(tab=>tab.id===1));
+  pi.sendMessage=deliver;
+  await command('merge');
+  assert.equal(sent.length,3,JSON.stringify(notices));
+  const afterClose=JSON.parse(await readFile(workspaceFile(parent),'utf8'));
+  assert.ok(!afterClose.tabs.some(tab=>tab.id===1));
+  assert.ok(afterClose.tabs.some(tab=>tab.id===2));
+  assert.match(await readFile(forkedFile,'utf8'),/first question/);
 });
 
 test('fork while a real parent SDK tool is running never waits for or aborts the parent', {timeout:30000}, async t => {

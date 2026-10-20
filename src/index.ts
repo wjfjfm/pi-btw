@@ -3,6 +3,7 @@ import { captureChild, startChild } from "./child.js";
 import { rawConversation } from "./snapshot.js";
 import { BtwView, type ViewAction } from "./view.js";
 import { MERGE_MODES, mergeContent } from "./merge.js";
+import { MergeDialog, mergeMode, type MergeOptions } from "./merge-dialog.js";
 import { Workspace, type Tab } from "./workspace.js";
 import { workspaceFile, saveWorkspace, restoreWorkspace } from "./persistence.js";
 
@@ -74,12 +75,18 @@ export default function btw(pi: ExtensionAPI) {
   async function chooseMerge(tab: Tab, destination: number, ctx: ExtensionContext) {
     requireDestination(destination,tab.id);
     const version = generation;
-    const choice = await ctx.ui.select(`Merge BTW ${tab.id} to ${destination ? `BTW ${destination}` : "main"}`,MERGE_MODES.map(option => option.label));
-    const mode = MERGE_MODES.find(option => option.label === choice)?.id;
-    if (!mode || version !== generation) return;
-    await merge(tab,destination,mode,ctx);
+    const targets = workspace.listRows(ctx.sessionManager,text => ctx.ui.theme?.fg("dim",text) ?? text)
+      .filter(row => row.id !== tab.id && (!row.id || !workspace.tabs.get(row.id)!.child.session.closed));
+    const options = await ctx.ui.custom<MergeOptions | undefined>((tui,theme,_keys,done) =>
+      new MergeDialog(tui,theme,tab.id,targets,destination,done),
+      {overlay:true,overlayOptions:{width:76,maxHeight:"100%"}});
+    if (!options || version !== generation) return;
+    await merge(tab,options,ctx);
   }
-  async function merge(tab: Tab, destination: number, mode: string, ctx: ExtensionContext) {
+  async function merge(tab: Tab, options: MergeOptions, ctx: ExtensionContext) {
+    const {destination} = options;
+    const mode = mergeMode(options);
+    if (workspace.tabs.get(tab.id) !== tab) throw new Error("Source BTW is closed");
     if (merging || tab.child.session.isStreaming) throw new Error("Wait until BTW is idle before merging");
     if (tab.child.session.closed) throw new Error("BTW process is closed");
     requireDestination(destination,tab.id);
@@ -95,10 +102,11 @@ export default function btw(pi: ExtensionAPI) {
       requireDestination(destination,tab.id);
       const message = {customType:"pi-btw-merge",display:true,
         content:`BTW ${MERGE_MODES.find(option => option.id === mode)!.label} — explicit user merge\nSession: ${manager.getSessionFile()}\n\n${content}`,
-        details:{sessionId:manager.getSessionId(),mode,leaf}};
+        details:{sessionId:manager.getSessionId(),mode,leaf,options}};
       if (destination === 0) pi.sendMessage(message,{triggerTurn:true,deliverAs:"followUp"});
       else await workspace.tabs.get(destination)!.child.session.merge(message);
       tab.merged.set(destination,leaf);
+      if (options.close) workspace.close(tab.id);
       save();
       tab.notice = `BTW ${tab.id} merged to ${destination || "main"}`;
       ctx.ui.notify(tab.notice,"info");
@@ -121,11 +129,7 @@ export default function btw(pi: ExtensionAPI) {
         if (sourceId === undefined || version !== generation) return;
         const tab = workspace.tabs.get(sourceId);
         if (!tab) throw new Error("Source BTW is closed");
-        const targets = workspace.listRows(ctx.sessionManager,text => ctx.ui.theme?.fg("dim",text) ?? text).filter(row => row.id !== sourceId && (!row.id || !workspace.tabs.get(row.id)!.child.session.closed));
-        const to = await ctx.ui.select(`Merge BTW ${sourceId} to`,targets.map(row => row.label));
-        const destination = targets.find(row => row.label === to)?.id;
-        if (destination === undefined || version !== generation) return;
-        await chooseMerge(tab,destination,ctx);
+        await chooseMerge(tab,0,ctx);
         return;
       }
       if (choice !== undefined) {
@@ -139,7 +143,7 @@ export default function btw(pi: ExtensionAPI) {
     if (verb === "merge") {
       const tab = selected();
       if (rest.length > 1 || (rest.length && !["source","main"].includes(rest[0])))
-        throw new Error("Use /btw merge [source|main], then choose a merge mode");
+        throw new Error("Use /btw merge [source|main], then confirm merge options");
       const target = rest[0] === "source" ? "source" : "main";
       await chooseMerge(tab,workspace.destination(tab,target),ctx); return;
     }
