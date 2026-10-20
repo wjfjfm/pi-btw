@@ -107,7 +107,7 @@ export default function btw(pi: ExtensionAPI) {
   async function command(args: string, ctx: ExtensionContext) {
     const [verb,...rest] = args.trim().split(/\s+/);
     if (verb === "list") {
-      const rows = workspace.listRows();
+      const rows = workspace.listRows(ctx.sessionManager);
       const choices = [...rows.map(row => row.label),"Merge…"];
       const ids = rows.map(row => row.id);
       const version = generation;
@@ -121,7 +121,7 @@ export default function btw(pi: ExtensionAPI) {
         if (sourceId === undefined || version !== generation) return;
         const tab = workspace.tabs.get(sourceId);
         if (!tab) throw new Error("Source BTW is closed");
-        const targets = workspace.listRows().filter(row => row.id !== sourceId && (!row.id || !workspace.tabs.get(row.id)!.child.session.closed));
+        const targets = workspace.listRows(ctx.sessionManager).filter(row => row.id !== sourceId && (!row.id || !workspace.tabs.get(row.id)!.child.session.closed));
         const to = await ctx.ui.select(`Merge BTW ${sourceId} to`,targets.map(row => row.label));
         const destination = targets.find(row => row.label === to)?.id;
         if (destination === undefined || version !== generation) return;

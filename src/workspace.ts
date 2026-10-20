@@ -1,4 +1,5 @@
 import type { Child } from "./child.js";
+import { childPreview, sessionPreview } from "./preview.js";
 
 export interface Tab {
   id: number;
@@ -24,8 +25,8 @@ export class Workspace {
     const index = Math.max(0, ids.indexOf(this.current));
     return this.current = ids[(index + direction + ids.length) % ids.length];
   }
-  listRows() {
-    const rows = [{id:0,label:"main"}];
+  listRows(main?: Parameters<typeof sessionPreview>[0]) {
+    const rows = [{id:0,label:["main",...(main ? sessionPreview(main).map(line => `    ${line}`) : [])].join("\n")}];
     const visited = new Set<number>();
     const walk = (tabs: Tab[], prefix: string) => {
       tabs.forEach((tab,index) => {
@@ -34,7 +35,8 @@ export class Workspace {
         const last = index === tabs.length - 1;
         const status = tab.child.session.closed ? "closed" : tab.child.session.dormant ? "saved" : tab.child.session.isStreaming ? "running" : "idle";
         const source = tab.source || "main";
-        rows.push({id:tab.id,label:`${prefix}${last ? "└─" : "├─"} BTW ${tab.id} · source ${source}${tab.source && !this.tabs.has(tab.source) ? " (closed)" : ""} · ${status}`});
+        const preview = childPreview(tab.child).map(line => `  ${prefix}${last ? "   " : "│  "}${line}`);
+        rows.push({id:tab.id,label:[`${prefix}${last ? "└─" : "├─"} BTW ${tab.id} · source ${source}${tab.source && !this.tabs.has(tab.source) ? " (closed)" : ""} · ${status}`,...preview].join("\n")});
         walk([...this.tabs.values()].filter(child => child.source === tab.id && !visited.has(child.id)),prefix + (last ? "   " : "│  "));
       });
     };
