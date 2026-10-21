@@ -69,11 +69,13 @@ test('native assistant displays fetch errors even without text, and renders stre
   f.session.error='worker disconnected';f.changed();assert.match(f.view.render(100).join('\n'),/worker disconnected/);
   f.view.dispose();
 });
-test('bidirectional shortcuts and direct close command',()=>{
+test('no cycling shortcuts; Esc returns to main and close is a command',()=>{
   const f=fixture();
-  f.view.handleInput('\x02');assert.equal(f.actions.at(-1).kind,'prev');
-  f.view.handleInput('\x06');assert.equal(f.actions.at(-1).kind,'next');
+  f.view.handleInput('\x1b');assert.equal(f.actions.at(-1).kind,'main');
   const before=f.actions.length;
+  f.view.handleInput('\x02');f.view.handleInput('\x06');
+  f.view.handleInput('\x1b[1;7D');f.view.handleInput('\x1b[1;7C');
+  assert.equal(f.actions.length,before,'Ctrl+B/F must remain editor keys');
   for(const key of ['\x1b[110;7u','\x1b[109;7u','\x1b[120;7u'])f.view.handleInput(key);
   assert.equal(f.actions.length,before);
   f.view.editor.setText('/btw close');f.view.handleInput('\r');

@@ -69,7 +69,7 @@ export default function btw(pi: ExtensionAPI) {
   }
   function selected() {
     const tab = workspace.tabs.get(workspace.current);
-    if (!tab) throw new Error("Select a BTW first using Ctrl+B/F or /btw list");
+    if (!tab) throw new Error("Select a BTW first using /btw list");
     return tab;
   }
   function requireDestination(id: number, source: number) {
@@ -165,7 +165,6 @@ export default function btw(pi: ExtensionAPI) {
       } else if (!choice.id || workspace.tabs.has(choice.id)) workspace.current = choice.id;
       return;
     }
-    if (verb === "next" || verb === "prev") { workspace.move(verb === "next" ? 1 : -1); return; }
     if (verb === "close") { await perform({kind:"close"},ctx); return; }
     if (verb === "merge") {
       const tab = selected();
@@ -179,7 +178,6 @@ export default function btw(pi: ExtensionAPI) {
   }
   async function perform(action: ViewAction,ctx: ExtensionContext) {
     if (action.kind === "main") workspace.current = 0;
-    else if (action.kind === "next" || action.kind === "prev") workspace.move(action.kind === "next" ? 1 : -1);
     else if (action.kind === "new") await create(ctx);
     else if (action.kind === "close") {
       if (merging || creating) throw new Error("BTW operation in progress");
@@ -221,8 +219,6 @@ export default function btw(pi: ExtensionAPI) {
       await perform(action,ctx); await show(ctx);
     } catch (e) { error(ctx,e); }
   }
-  pi.registerCommand("btw",{description:"Fork BTW | list | next | prev | merge [source|main] | close",
+  pi.registerCommand("btw",{description:"Fork BTW | list | merge [source|main] | close",
     handler:async (args,ctx) => { await run(ctx,{kind:"command",text:args}); }});
-  for (const [key,kind] of [["ctrl+b","prev"],["ctrl+f","next"]] as const)
-    pi.registerShortcut(key,{description:`BTW ${kind}`,handler:async ctx => { await run(ctx,{kind}); }});
 }

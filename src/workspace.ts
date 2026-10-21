@@ -20,11 +20,6 @@ export class Workspace {
     this.tabs.set(tab.id, tab); this.current = tab.id;
     return tab;
   }
-  move(direction: 1 | -1) {
-    const ids = [0, ...this.tabs.keys()];
-    const index = Math.max(0, ids.indexOf(this.current));
-    return this.current = ids[(index + direction + ids.length) % ids.length];
-  }
   listRows(main?: Parameters<typeof sessionPreview>[0], dim?: (text: string) => string) {
     const rows = [{id:0,label:"main" + (main ? inlinePreview(sessionPreview(main),dim) : "")}];
     const visited = new Set<number>();

@@ -4,8 +4,8 @@ import { Editor, Text, matchesKey, truncateToWidth, wrapTextWithAnsi, type Compo
 import type { Tab } from "./workspace.js";
 import { childPreview, inlinePreview } from "./preview.js";
 
-export type ViewAction = { kind: "next" | "prev" | "main" | "new" | "close" | "command"; text?: string };
-export const HELP = "Ctrl+B prev · Ctrl+F next · Esc main | /btw · /btw list · /btw merge · /btw close";
+export type ViewAction = { kind: "main" | "new" | "close" | "command"; text?: string };
+export const HELP = "Esc main | /btw · /btw list · /btw merge · /btw close";
 
 /** Pi's native message components and child footer in a full-screen viewport. */
 export class BtwView {
@@ -37,8 +37,7 @@ export class BtwView {
   saveDraft() { this.tab.draft = this.editor.getText(); }
   dispose() { this.saveDraft(); this.unsubscribe(); }
   handleInput(data: string) {
-    for (const [key,kind] of [["ctrl+b","prev"],["ctrl+f","next"],["escape","main"]] as const)
-      if (matchesKey(data,key)) { this.action({kind}); return; }
+    if (matchesKey(data,"escape")) { this.action({kind:"main"}); return; }
     if (matchesKey(data,"ctrl+c")) {
       void this.tab.child.session.abort().catch(error => { this.error = String(error); this.tui.requestRender(); }); return;
     }

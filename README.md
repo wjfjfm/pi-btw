@@ -1,56 +1,34 @@
 # pi-btw
 
-从当前 Pi 会话 fork 独立子会话，支持多个 BTW、嵌套派生、全屏切换与显式合并。尚未实现分屏。
+从当前会话派生独立分支，并行探索，按需合并回主线。
 
-## 原则
-
-- 未使用时零上下文注入：不注册模型工具，不修改主会话 prompt/context。
-- 创建、切换和执行 BTW 不自动回注。只有用户显式 merge 才发送消息。
-- 每个 BTW 有独立 session 文件和 SDK 子进程。切换不暂停后台执行。
-- 复用原生 `SessionManager.createBranchedSession()`，不自行重建有效历史。
+```text
+main ────────────────◀── merge
+       ╰── BTW 1 ──────╯
+            ╰── BTW 2
+```
 
 ## 使用
 
-Pi 1.3.0、Node 22：
-
-```sh
-cd /path/to/pi-btw
-npm ci --ignore-scripts
-npm run build
-pi -e /path/to/pi-btw/src/index.ts
-```
-
-在主界面或 BTW 输入 `/btw [问题]`，从当前聚焦会话创建新的 BTW。也可用 `/btw new [问题]`。原有 BTW 继续运行。
-
-| 快捷键 | 操作 |
-| --- | --- |
-| `Ctrl+B` | 上一个会话 |
-| `Ctrl+F` | 下一个会话 |
-| `Esc` | 回到主界面；菜单中取消菜单 |
-| BTW 内 `Ctrl+C` | 仅取消当前 BTW 执行 |
-| `PageUp` / `PageDown` | 滚动当前 BTW 对话 |
-
-前后切换按创建顺序循环，包含主会话。BTW 专用快捷键仅前后切换和 Esc，显示在底栏。`Ctrl+B/F` 占用原来的左右移光标快捷键，仍可使用方向键。新建、合并和关闭使用命令。若 tmux 使用默认 `Ctrl+B` 前缀，按两次 `Ctrl+B` 才会将该按键发送给 Pi；也可用 `/btw prev`。
-
-`/btw list` 按 source 关系树状显示 main 和全部 BTW，标注来源、运行状态；选择后切换，取消则留在当前会话。来源已关闭的分支仍列出，并标注 `(closed)`。
-
-会话列表及 merge 的来源/目标列表，在会话信息同一行后方，以暗色显示“第一条 … 最新一条”正文预览，不添加首/末标签。BTW 只取派生后的对话，不混入继承历史；不显示 thinking 或工具输出，不调用模型。长内容截短显示，原始对话不变。
-
-在 `/btw list` 中用 ↑↓ 高亮要合并的 BTW，按 **m** 进入与 `/btw merge` 相同的选项弹窗；Enter 切换会话，Esc 取消。列表默认高亮当前会话，不再提供 `Merge…` 条目或额外来源选择。目标可选 main 或其他可用 BTW，不包括自身。任一步取消都不合并。
-
-在当前 BTW 中也可使用：
-
 ```text
-/btw list
-/btw next
-/btw prev
-/btw merge
-/btw merge source
-/btw merge main
-/btw close
+/btw 检查另一种实现方案
 ```
 
-`/btw merge` 打开统一弹窗；`/btw merge source` 仅将目标预设为直接来源，仍须确认。
+新分支继承当前上下文，在独立进程中运行，不打断原会话；也可以从 BTW 继续派生。首次提问时附带分支提示：除非用户明确要求，否则不继续原任务，避免并发冲突。只有显式合并才回注结果。
+
+| 操作 | 命令 / 快捷键 |
+| --- | --- |
+| 返回 main | `Esc` |
+| 查看分支 | `/btw list`；Enter 切换，**m** 合并，**c** 关闭高亮分支 |
+| 合并当前分支 | `/btw merge` |
+| 关闭当前分支并返回 main | `/btw close`（直接执行） |
+| 中断当前 BTW | `Ctrl+C` |
+
+列表与状态栏显示分支正文摘要，不调用模型。重开同一主会话后，可通过 `/btw list` 恢复分支。
+
+## 合并
+
+`/btw merge` 与列表中的 **m** 打开同一个弹窗：
 
 ```text
 Merge to:           main
@@ -61,61 +39,24 @@ Conversation:       Strip
 [OK]  Cancel
 ```
 
-默认聚焦 OK，下一个为 Cancel，再依次进入四个字段。Tab / ↑↓ 移动焦点，←→ 修改值，Enter 确认按钮或切换字段，Esc 取消。每次打开恢复上述默认值。
+默认聚焦 OK。Tab / ↑↓ 移动焦点，←→ 修改选项，Enter 确认，Esc 取消。
 
-- **Close current btw**：确认目标当前分支已落盘本次 merge 后，才关闭所选源 BTW 并从列表移除，保留会话文件与其后代；No 则保留源 BTW。
-- **Summary**：Yes 使用原生 tree 摘要，No 不请求摘要模型。
-- **Conversation**：Full 保留完整原文（含 thinking、工具调用与结果）；Strip 仅保留用户/助手正文、图片及可见 custom 消息；None 不附对话。
-- Summary No + Conversation None 没有可合并内容，弹窗会阻止确认。取消、摘要失败、投递失败或确认超时均不关闭源 BTW。
+- **Merge to**：main 或其他 BTW；`/btw merge source` 预选直接来源。
+- **Summary**：是否生成摘要。
+- **Conversation**：Full 保留 thinking、工具调用与结果；Strip 只保留正文、图片和可见消息；None 不附对话。
+- **Close current btw**：目标确认落盘后才关闭源分支，始终保留原始会话文件。
 
-不提供 `/merge` 或 `/main` 命令。主界面可通过 `/btw list → 高亮 BTW → m` 合并已有 BTW。
+目标忙时通过 steer 排队，在当前工具批次结束后进入下一次 API 请求。失败或两分钟未确认，源分支保留；等待期间源有新消息、运行任务或草稿，也不会自动关闭。超时不代表队列已取消，重试前请检查目标。
 
-`source` 是直接来源；`main` 是最初主会话。关闭只结束当前 BTW，不关闭其后代。source 已关闭时，合并到 source 明确报错，仍可合并到 main。关闭保留 session 文件。
+分支共享工作目录，**不隔离文件修改**。新会话文件存入 `btw-sessions/`，不参与原生 `--continue`；旧版顶层文件需手动指定主会话恢复。更多见[行为与限制](docs/behavior.md)。
 
-## 持久化
+## 本地运行
 
-新建 BTW 的对话文件放在会话目录的 `btw-sessions/` 子目录，嵌套 BTW 复用该目录，不参与 Pi 原生 `--continue` 和 `/resume` 的顶层会话发现。BTW 仍通过 `/btw list` 恢复，也可用 `pi --session <完整路径>` 单独打开。
-
-旧版放在顶层的 BTW 文件不会自动搬动，避免破坏仍在写入的进程和已有工作区引用。因此旧文件仍可能被 `--continue` 选中；迁移前请使用 `pi --session <主会话完整路径>`，不要把 `/reload` 当作旧文件迁移。
-
-BTW 列表按主 session 保存。重新打开同一主会话或 `/reload` 后，`/btw list` 恢复列表、source 关系、已保存草稿与合并去重记录。恢复的条目标记为 `saved`；切换到它时才启动子进程，沿用原 session 文件，不自动发送提示或续跑中断任务。未完成工具不会重放。
-
-列表以权限 `0600` 原子写入主 session 目录下的 `btw-workspaces/<主session-id>.json`，包含恢复所需配置，不进入模型上下文。草稿在切换或正常退出时保存。主会话使用 `--no-session` 时不保存列表；`/btw close` 从列表移除该项，但仍保留子会话文件。新功能不自动导入旧版本未登记的 BTW 文件。
-
-## 显示与网络
-
-BTW 状态栏在当前分支编号与来源后，复用 `/btw list` 的暗色“第一条 … 最新一条”正文摘要；新消息完成后更新，不请求模型，并按终端宽度截断。
-
-使用 Pi 原生用户、助手、custom message 和工具执行组件，保留 Markdown、代码高亮、thinking 和错误显示。IPC 同步后台状态、流式内容与最终回复；切走再返回仍能看到最新内容。进程故障也会显示，不把空正文当作没有消息。
-
-SDK 子进程显式初始化 Pi 的 HTTP 代理及超时配置，支持环境变量 `HTTP_PROXY`、`HTTPS_PROXY`、`NO_PROXY`。此处复用 Pi 1.3.0 内部 `http-dispatcher` 适配器，升级宿主版本时需要回归测试。
-
-## 快照与合并
-
-同步捕获当前分支，在独立 SessionManager 上原生 fork，保留 compaction、context edits、标签和扩展持久化记录。继承模型、thinking、system prompt、设置和可发现的工具/扩展。从 BTW 派生时由源子进程捕获其当前状态，不读取旧缓存替代现场。
-
-运行中也可以 fork。未完成工具在子会话内补明确的快照边界错误结果，不重放、不取消源工具；未完成流式响应作为观察记录附加到子会话。
-
-完整模式包含 fork 后当前分支的完整原文 JSONL，不截断，保留新增消息、工具结果、图片原始数据及摘要记录，不重复包含 fork 前历史。conversation 使用过滤后的 JSONL 保存正文与图片，不额外请求模型。Summary Yes 复用 Pi `/tree` 的 `generateBranchSummary()`，使用原生 prompt、预算和文件清单策略；原生摘要预处理省略工具结果，并可能按预算舍弃较旧消息。摘要失败或取消不合并。
-
-合并以可见 custom message 发送，使用 follow-up 排队，不中断目标任务。每次带唯一 merge ID，只有在目标会话文件当前分支查到该 ID 才确认成功；排队不等于送达。等待期间保留源 BTW，阻止同源同目标重复投递。两分钟未确认会提示超时并保留源，迟到的消息仍可能被目标消费，重试前请检查目标。关闭/重载会停止确认监控，未确认源仍保留在工作区，不自动重发。无持久化目标文件时无法确认，保守地保留源。即使已确认，若源在等待期间新增消息、正在运行或有草稿，也不会自动关闭。每个目标分别防止同一 revision 重复合并；后续合并包含 fork 后全部对话，而非增量。不修改或删除原始对话文件，也不自动切换到目标。Close current btw 默认 Yes；关闭当前焦点 BTW 时，按普通 close 规则回到上一个会话，否则保留原焦点。
-
-## 当前边界
-
-**这是持久化会话 fork，不是整个运行时的完整克隆。**
-
-- Pi 扩展 API 无法导出任意扩展内存、待发送队列、运行中工具进程和全部临时资源配置。仅注册 hook/provider 的临时 CLI 扩展可能无法从主会话发现；自定义运行时工具无法恢复时拒绝启动，不默默降级。
-- 扩展在子进程重新加载，可能应用自身恢复策略，例如 goal 恢复为 paused。内置工具扩展重新初始化。
-- 子会话扩展以 print 模式绑定，尚未代理扩展对话框及跨进程自定义渲染器；工具使用原生通用渲染，图片仍为占位而非终端图像。
-- 父子共享工作目录和文件系统，写文件、bash、外部服务等副作用不隔离。进程隔离不等于工作区隔离。
-- 退出主 Pi 会结束全部子进程；重新打开同一主会话可恢复 BTW 列表，执行中的进程和未持久化扩展内存不会恢复。也可用 `pi --session <文件>` 单独打开子会话。
-
-## 验证
+Pi 1.3.0，Node.js ≥22.19.0。
 
 ```sh
-npm test
+cd /path/to/pi-btw
+npm ci --ignore-scripts
+npm run build
+pi -e ./src/index.ts
 ```
-
-覆盖原生 fork、context edits/compaction、运行中父工具隔离、独立进程与嵌套 fork、source 合并、原文与原生摘要、错误/流式渲染、双向切换和关闭、真实 HTTP CONNECT 代理，以及未使用 BTW 时模型请求与基线相同（忽略时间戳）。
-
-此外已在隔离 tmux 终端使用模拟模型验证创建、输入、回复可见性、嵌套创建、双向切换、source merge 和关闭确认；不代表所有终端或在线模型均已验证。
