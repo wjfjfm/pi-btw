@@ -90,7 +90,7 @@ test('independent SDK process inherits history/system/tools and does not mutate 
   assert.ok((await readFile(parent.getSessionFile(), 'utf8')).startsWith(before));
 });
 
-test('extension merges only explicitly, queues follow-up, prevents duplicates, and summarizes', {timeout:30000}, async t => {
+test('extension merges only explicitly, queues steering, prevents duplicates, and summarizes', {timeout:30000}, async t => {
   const {parent,capture} = await fixture(t);
   const previous = process.env.PI_CODING_AGENT_DIR;
   process.env.PI_CODING_AGENT_DIR = capture.agentDir;
@@ -135,7 +135,7 @@ test('extension merges only explicitly, queues follow-up, prevents duplicates, a
   await command('merge');
   assert.equal(sent.length, 1, JSON.stringify(notices));
   assert.match(sent[0].message.content, /first question/);
-  assert.equal(sent[0].options.deliverAs, 'followUp');
+  assert.equal(sent[0].options.deliverAs, 'steer');
   assert.equal(sent[0].options.triggerTurn, true);
   await command('merge');
   assert.equal(sent.length, 1);
@@ -215,8 +215,9 @@ test('fork while a real parent SDK tool is running never waits for or aborts the
     customTools:[{name:'gate',label:'gate',description:'hold a parent operation',parameters:{type:'object',properties:{}},execute:async () => {entered();await gate;return {content:[{type:'text',text:'parent completed'}],details:undefined};}}]});
   t.after(() => {release();session.dispose();});
   let calls=0;
-  session.agent.streamFunction = () => {
+  session.agent.streamFunction = (_model,context) => {
     const first=++calls===1;
+    if (!first) assert.match(JSON.stringify(context.messages),/queued merge during main tool/,"merge must reach the very next API request");
     const message={role:'assistant',content:first?[{type:'toolCall',id:'running-parent-call',name:'gate',arguments:{}}]:[{type:'text',text:'parent done'}],api:model.api,provider:model.provider,model:model.id,
       usage:{input:1,output:1,cacheRead:0,cacheWrite:0,totalTokens:2,cost:{input:0,output:0,cacheRead:0,cacheWrite:0,total:0}},stopReason:first?'toolUse':'stop',timestamp:Date.now()};
     const stream=createAssistantMessageEventStream();stream.push({type:'done',reason:message.stopReason,message});stream.end();return stream;
@@ -234,11 +235,11 @@ test('fork while a real parent SDK tool is running never waits for or aborts the
   assert.equal(parent.getSessionId(),originalId); assert.equal(parent.getLeafId(),originalLeaf);
   child.session.dispose();
   assert.equal(session.isStreaming,true);
-  await session.sendCustomMessage({customType:'pi-btw-merge',content:'queued merge during main tool',display:true,details:{mergeId:'busy-main-receipt'}},{triggerTurn:true,deliverAs:'followUp'});
+  await session.sendCustomMessage({customType:'pi-btw-merge',content:'queued merge during main tool',display:true,details:{mergeId:'busy-main-receipt'}},{triggerTurn:true,deliverAs:'steer'});
   assert.equal(hasMergeReceipt(parent.getSessionFile(),'busy-main-receipt'),false,'queue acknowledgement is not delivery');
   release();await running;
   assert.equal(session.isStreaming,false);
-  assert.equal(calls,3);
+  assert.equal(calls,2);
   assert.equal(hasMergeReceipt(parent.getSessionFile(),'busy-main-receipt'),true);
   assert.match(JSON.stringify(session.messages),/queued merge during main tool/);
 });

@@ -113,7 +113,7 @@ export default function btw(pi: ExtensionAPI) {
       const message = {customType:"pi-btw-merge",display:true,
         content:`BTW ${MERGE_MODES.find(option => option.id === mode)!.label} — explicit user merge\nSession: ${manager.getSessionFile()}\n\n${content}`,
         details:{sessionId:manager.getSessionId(),mode,leaf,options,mergeId}};
-      if (destination === 0) pi.sendMessage(message,{triggerTurn:true,deliverAs:"followUp"});
+      if (destination === 0) pi.sendMessage(message,{triggerTurn:true,deliverAs:"steer"});
       else await workspace.tabs.get(destination)!.child.session.merge(message);
       const settle = (received: boolean) => {
         pendingMerges.delete(pendingKey);

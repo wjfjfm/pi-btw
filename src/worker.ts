@@ -86,7 +86,7 @@ process.on("message", async (request: { id: number; method: string; config?: Wor
       return;
     } else if (request.method === "merge") {
       if (!session || !request.message) throw new Error("Not initialized");
-      await session.sendCustomMessage(request.message, { triggerTurn: true, deliverAs: "followUp" });
+      await session.sendCustomMessage(request.message, { triggerTurn: true, deliverAs: "steer" });
     } else if (request.method === "abort") {
       await session?.abort();
     } else if (request.method === "dispose") {
