@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SessionManager, createAgentSession, DefaultResourceLoader, SettingsManager } from '@earendil-works/pi-coding-agent';
 import { createAssistantMessageEventStream } from '@earendil-works/pi-ai';
-import { forkSnapshot } from '../dist/snapshot.js';
+import { forkSnapshot, rawConversation } from '../dist/snapshot.js';
 import { startChild } from '../dist/child.js';
 import btw from '../dist/index.js';
 import {hasMergeReceipt} from '../dist/merge-receipt.js';
@@ -39,6 +39,29 @@ export default function(pi) {
   return {cwd,parent,capture};
 }
 
+test('branch context is delayed until first user prompt, once per branch and excluded from merge', {timeout:30000}, async t=>{
+  const {parent,capture}=await fixture(t);
+  const child=await startChild(capture);t.after(()=>child.session.dispose());
+  const branch=()=>SessionManager.open(child.manager.getSessionFile());
+  const notes=()=>branch().getBranch().filter(e=>e.type==='custom_message'&&e.customType==='pi-btw-context');
+  assert.equal(notes().length,0,'startup must not inject or trigger a turn');
+  await child.session.prompt('first branch question');
+  assert.equal(notes().length,1);
+  assert.match(notes()[0].content,/除非用户明确指定/);
+  assert.match(JSON.stringify(child.session.messages.at(-1)),/除非用户明确指定/,'first model request includes safety message');
+  await child.session.prompt('second branch question');
+  assert.equal(notes().length,1);
+  assert.equal(branch().getBranch().filter(e=>e.type==='message'&&e.message.role==='assistant').length,2,'no extra model turn for introduction');
+  assert.ok(!rawConversation(branch(),child.boundary).split('\n').map(JSON.parse).some(e=>e.customType==='pi-btw-context'));
+  assert.ok(!parent.getBranch().some(e=>e.customType==='pi-btw-context'));
+  const nested=await startChild(await child.session.snapshot());t.after(()=>nested.session.dispose());
+  const own=()=>rawConversation(SessionManager.open(nested.manager.getSessionFile()),nested.boundary);
+  assert.equal(own(),'');
+  await nested.session.prompt('nested first question');
+  const entries=SessionManager.open(nested.manager.getSessionFile()).getBranch();
+  const boundary=entries.findIndex(e=>e.id===nested.boundary);
+  assert.equal(entries.slice(boundary+1).filter(e=>e.customType==='pi-btw-context').length,1,'inherited reminder does not suppress nested introduction');
+});
 test('independent SDK process inherits history/system/tools and does not mutate parent or globals', {timeout:30000}, async t => {
   const {parent,capture} = await fixture(t);
   const before = await readFile(parent.getSessionFile(), 'utf8');

@@ -4,6 +4,8 @@ import { SessionManager, type ExtensionContext } from "@earendil-works/pi-coding
 type ReadonlySessionManager = ExtensionContext["sessionManager"];
 
 export const ORIGIN = "pi-btw-origin";
+export const BRANCH_CONTEXT = "pi-btw-context";
+export const BRANCH_INSTRUCTIONS = "你现在已切换到独立的 BTW 分支。原始 Agent 可能仍在原会话中运行。请回答用户在当前分支提出的问题；除非用户明确指定，否则不要继续此前继承的工作，也不要重放原会话的工具操作。各分支共享工作目录，避免并发修改文件或执行相互冲突的操作。";
 export interface Origin {
   parentId: string;
   parentFile?: string;
@@ -72,6 +74,6 @@ export function rawConversation(manager: ReadonlySessionManager, boundary: strin
   const index = branch.findIndex(entry => entry.id === boundary);
   if (index < 0) throw new Error("BTW fork boundary is not on the active branch");
   return branch.slice(index + 1)
-    .filter(entry => entry.type === "message" || entry.type === "custom_message" || entry.type === "branch_summary" || entry.type === "compaction")
+    .filter(entry => entry.type === "message" || (entry.type === "custom_message" && entry.customType !== BRANCH_CONTEXT) || entry.type === "branch_summary" || entry.type === "compaction")
     .map(entry => JSON.stringify(entry)).join("\n");
 }

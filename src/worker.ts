@@ -4,7 +4,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { captureChild, type WorkerConfig } from "./child.js";
 import { configureNetwork } from "./network.js";
-import { sealPendingCalls } from "./snapshot.js";
+import { sealPendingCalls, ORIGIN, BRANCH_CONTEXT, BRANCH_INSTRUCTIONS } from "./snapshot.js";
 import { createFooter } from "./footer.js";
 
 let session: AgentSession | undefined;
@@ -29,7 +29,16 @@ process.on("message", async (request: { id: number; method: string; config?: Wor
           pi => {
             api = pi;
             pi.on("session_start", (_event, ctx) => { context = ctx; });
-            pi.on("before_agent_start", () => ({ systemPrompt: c.systemPrompt }));
+            pi.on("before_agent_start", (event,ctx) => {
+              const branch = ctx.sessionManager.getBranch();
+              const boundary = branch.map(entry => entry.type === "custom" && entry.customType === ORIGIN).lastIndexOf(true);
+              const introduced = branch.slice(boundary + 1).some(entry => entry.type === "custom_message" && entry.customType === BRANCH_CONTEXT);
+              return { systemPrompt: c.systemPrompt,
+                ...(event.messageType === "user" && boundary >= 0 && !introduced ? {
+                  message: {customType:BRANCH_CONTEXT,content:BRANCH_INSTRUCTIONS,display:true},
+                } : {}),
+              };
+            });
           },
           { name: "codemode", builtin: true, factory: createCodemodeExtension({ mode: "on" }) },
           { name: "tool_search", builtin: true, factory: createToolSearchExtension() },
