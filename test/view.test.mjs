@@ -29,6 +29,18 @@ test('native view fits terminal, preserves draft, and switches without cancellin
   f.view.handleInput('\x03');assert.equal(f.counts().aborted,1);
   f.view.dispose();assert.equal(f.counts().disposed,1);
 });
+test('long history renders only its tail initially and PageUp reaches the beginning',()=>{
+  const messages=Array.from({length:300},(_,i)=>({role:'user',content:`HISTORY_MARKER_${i}`,timestamp:i}));
+  const f=fixture(messages);
+  const initial=f.view.render(100).join('\n');
+  assert.ok(f.view.history.start>0,'do not format the entire history on first render');
+  assert.match(initial,/HISTORY_MARKER_299/);
+  for(let i=0;i<200;i++) {f.view.handleInput('\x1b[5~');f.view.render(100);}
+  assert.equal(f.view.history.start,0,'older history remains accessible');
+  assert.match(f.view.render(100).join('\n'),/HISTORY_MARKER_0\b/);
+  f.view.dispose();
+});
+
 test('footer reuses list preview and refreshes on new messages',t=>{
   const dir=mkdtempSync(join(tmpdir(),'btw-footer-preview-'));
   t.after(()=>rmSync(dir,{recursive:true,force:true}));

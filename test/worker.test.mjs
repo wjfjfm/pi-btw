@@ -12,8 +12,12 @@ import {hasMergeReceipt} from '../dist/merge-receipt.js';
 import {Workspace} from '../dist/workspace.js';
 import {saveWorkspace,restoreWorkspace,workspaceFile} from '../dist/persistence.js';
 
+async function waitFor(check) {
+  const deadline=Date.now()+10000;
+  while (!check()) { if(Date.now()>deadline) throw new Error('Condition timed out'); await new Promise(r=>setTimeout(r,20)); }
+}
 const model = {id:'btw-test',name:'btw-test',api:'openai-completions',provider:'btw-test',baseUrl:'http://unused.invalid',reasoning:false,input:['text'],contextWindow:100000,maxTokens:1000,cost:{input:0,output:0,cacheRead:0,cacheWrite:0}};
-async function fixture(t) {
+async function fixture(t, delay = 80) {
   const cwd = await mkdtemp(join(tmpdir(), 'pi-btw-worker-'));
   t.after(async () => { await new Promise(r => setTimeout(r, 150)); await rm(cwd, {recursive:true, force:true}); });
   const extension = join(cwd, 'provider.ts');
@@ -27,7 +31,7 @@ export default function(pi) {
       setTimeout(() => {
         const message = {role:'assistant',content:[{type:'text',text:'child reply: '+JSON.stringify(context.messages)}],api:'openai-completions',provider:'btw-test',model:'btw-test',usage:{input:1,output:1,cacheRead:0,cacheWrite:0,totalTokens:2,cost:{input:0,output:0,cacheRead:0,cacheWrite:0,total:0}},stopReason:'stop',timestamp:Date.now()};
         stream.push({type:'done',reason:'stop',message}); stream.end();
-      }, 80);
+      }, ${delay});
       return stream;
     }
   });
@@ -76,6 +80,7 @@ test('independent SDK process inherits history/system/tools and does not mutate 
   await running;
   assert.equal(child.session.isStreaming, false);
   assert.ok(events.includes('message_end'));
+  assert.match(child.session.preview.join(' '),/BTW question/);
   const footer=await child.session.request('footer',{width:120,theme:'dark'});
   assert.match(footer.join('\n'),/btw-test/);
   assert.match(footer.join('\n'),/KEEP_EXISTING_STATUS/);
@@ -108,22 +113,36 @@ test('extension merges only explicitly, queues steering, prevents duplicates, an
       parent.appendCustomMessageEntry(message.customType,message.content,message.display,message.details);
     },
   };
-  let summaryRaw, selection, listSelection;
+  let summaryRaw, selection, listSelection, summaryFinish;
+  let holdSummary=false;
   const choose=async () => undefined;
-  const dialog=async (_factory,options) => options?.overlayOptions?.width === 76 ? selection : !options ? listSelection : undefined;
+  let shownTab;
+  const dialog=async (factory,options) => {
+    if(options?.overlayOptions?.width===76)return selection;
+    if(!options)return listSelection;
+    const panel=factory({terminal:{rows:40},requestRender(){}},{fg:(_name,text)=>text},undefined,()=>{});
+    shownTab=panel.tab;panel.dispose();
+    return undefined;
+  };
   const ctx = {
     mode:'tui', cwd:capture.cwd, model, thinkingLevel:'off', scopedModels:[], sessionManager:parent,
     getSystemPrompt:() => capture.systemPrompt, isProjectTrusted:() => true,
-    modelRegistry:{streamSimple:(_model, context) => {summaryRaw=JSON.stringify(context.messages);const stream=createAssistantMessageEventStream();stream.push({type:'done',reason:'stop',message:{stopReason:'stop',content:[{type:'text',text:'merged summary'}]}});stream.end();return stream;}},
+    modelRegistry:{streamSimple:(_model, context) => {summaryRaw=JSON.stringify(context.messages);const stream=createAssistantMessageEventStream();const finish=()=>{stream.push({type:'done',reason:'stop',message:{stopReason:'stop',content:[{type:'text',text:'merged summary'}]}});stream.end();};if(holdSummary)summaryFinish=finish;else finish();return stream;}},
     ui:{select:choose, custom:dialog, notify:(message,type) => notices.push({message,type})},
   };
   btw(pi); handlers.get('session_start')({}, ctx);
   t.after(() => handlers.get('session_shutdown')());
-  const command = args => commands.get('btw')(args, ctx);
+  const command = async args => {
+    const before=notices.length;
+    await commands.get('btw')(args, ctx);
+    const started=notices.slice(before).find(n=>/generating summary|preparing merge/.test(n.message));
+    if (started) await waitFor(()=>notices.at(-1)!==started);
+  };
   assert.equal(sent.length, 0);
   await command('first question');
   const forkedFile=notices.at(-1).message.match(/: (.*)$/)[1];
-  await new Promise(r => setTimeout(r, 500));
+  await waitFor(()=>/child reply/.test(JSON.stringify(SessionManager.open(forkedFile).buildSessionContext().messages)));
+  await waitFor(()=>!shownTab.child.session.isStreaming);
   const forked=SessionManager.open(forkedFile);
   const firstPrompts=forked.buildSessionContext().messages.filter(m=>m.role==='user'&&JSON.stringify(m.content).includes('first question'));
   assert.equal(firstPrompts.length,1,'/btw <question> submits the initial question exactly once');
@@ -141,9 +160,16 @@ test('extension merges only explicitly, queues steering, prevents duplicates, an
   assert.equal(sent.length, 1);
   assert.match(notices.at(-1).message, /already been merged/);
   await command('second question');
-  await new Promise(r => setTimeout(r, 500));
+  const secondFile=notices.at(-1).message.match(/: (.*)$/)[1];
+  await waitFor(()=>/child reply/.test(JSON.stringify(SessionManager.open(secondFile).buildSessionContext().messages).replace(/parent context/g,'')) && SessionManager.open(secondFile).getBranch().filter(e=>e.type==='message'&&e.message.role==='assistant').length>=2);
+  await waitFor(()=>!shownTab.child.session.isStreaming);
   selection={destination:0,close:false,summary:true,conversation:'None'};
-  await command('merge');
+  holdSummary=true;
+  await commands.get('btw')('merge',ctx);
+  assert.equal(sent.length,1,'command returns while summary is still pending');
+  assert.match(notices.at(-1).message,/generating summary/);
+  assert.ok(summaryFinish);summaryFinish();holdSummary=false;
+  await waitFor(()=>sent.length===2);
   assert.equal(sent.length, 2, JSON.stringify(notices));
   assert.match(sent[1].message.content, /merged summary/);
   assert.match(summaryRaw, /second question/);
@@ -161,6 +187,7 @@ test('extension merges only explicitly, queues steering, prevents duplicates, an
   selection={destination:1,close:false,summary:false,conversation:'Strip'};
   await command('list');
   assert.equal(sent.length,2,'list merge to child must not inject main');
+  await waitFor(()=>SessionManager.open(forkedFile).getBranch().some(e=>e.type==='custom_message'&&e.customType==='pi-btw-merge'));
   const mergedSource=SessionManager.open(forkedFile).getBranch().filter(e=>e.type==='custom_message'&&e.customType==='pi-btw-merge');
   assert.equal(mergedSource.length,1);assert.equal(mergedSource[0].details.mode,'conversation');
   assert.equal(await readFile(originalBtwFile,'utf8'),originalBtw,'merge must preserve original BTW');
@@ -258,7 +285,7 @@ test('nested BTW captures current child state, runs independently, and explicitl
   assert.doesNotMatch(JSON.stringify(first.session.messages),/nested question/);
   const message={customType:'pi-btw-merge',content:'explicit nested result',display:true};
   await first.session.merge(message);
-  for(let i=0;i<100 && first.session.isStreaming;i++)await new Promise(r=>setTimeout(r,20));
+  await waitFor(()=>JSON.stringify(first.session.messages).includes('explicit nested result') && !first.session.isStreaming);
   assert.match(JSON.stringify(first.session.messages),/explicit nested result/);
   assert.ok(updates>0);
   assert.doesNotMatch(await readFile(parent.getSessionFile(),'utf8'),/source conversation|nested question|explicit nested result/);
@@ -298,6 +325,32 @@ test('workspace restores list lazily with same session, source, draft and merge 
   assert.equal(again.tabs.size,1);assert.equal(again.tabs.get(b.id).source,a.id);
   assert.throws(()=>again.destination(again.tabs.get(b.id),'source'),/closed/);
   assert.throws(()=>restoreWorkspace(file,'different-parent',new Workspace()),/Invalid/);
+});
+
+test('prepared BTW is usable before startup; cancelling pending prompt does not send it', {timeout:30000}, async t=>{
+  const {capture}=await fixture(t);
+  const {prepareChild}=await import('../dist/child.js');
+  const child=prepareChild(capture);t.after(()=>child.session.dispose());
+  assert.equal(child.session.starting,true);
+  assert.equal(child.session.dormant,true);
+  assert.match(JSON.stringify(child.session.messages),/parent context/);
+  const prompt=child.session.prompt('cancel before initialization');
+  const cancelled=assert.rejects(prompt,/cancelled during startup/);
+  await child.session.abort();await cancelled;
+  assert.equal(child.session.starting,false);
+  assert.doesNotMatch(JSON.stringify(child.session.messages),/cancel before initialization/);
+  assert.ok(child.session.startupTimings.total>0);
+});
+
+test('merge dispatch returns before a slow target response, receipt still requires persistence', {timeout:30000}, async t=>{
+  const {capture}=await fixture(t,1500);
+  const child=await startChild(capture);t.after(()=>child.session.dispose());
+  const start=performance.now();
+  await child.session.merge({customType:'pi-btw-merge',content:'slow merge target',display:true,details:{mergeId:'slow-target'}});
+  t.diagnostic(`merge dispatch: ${(performance.now()-start).toFixed(1)}ms`);
+  assert.ok(!child.session.messages.some(m=>m.role==='assistant'),'dispatch must not wait for model response');
+  await waitFor(()=>hasMergeReceipt(child.manager.getSessionFile(),'slow-target'));
+  await waitFor(()=>child.session.messages.some(m=>m.role==='assistant')&&!child.session.isStreaming);
 });
 
 test('missing inherited tool fails explicitly, without touching parent', {timeout:30000}, async t => {

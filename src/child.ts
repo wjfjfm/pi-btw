@@ -3,6 +3,7 @@ import { isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import { SessionManager, getAgentDir, type AgentSession, type AgentSessionEvent, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { forkSnapshot } from "./snapshot.js";
+import { primePreview } from "./preview.js";
 
 export function captureChild(pi: ExtensionAPI, ctx: ExtensionContext, partial?: unknown) {
   const snapshot = forkSnapshot(ctx.sessionManager, ctx.cwd, partial);
@@ -22,6 +23,9 @@ export class ChildSession {
   messages: AgentSession["messages"] = [];
   partial: AgentSession["messages"][number] | undefined;
   error = "";
+  startupTimings: Record<string,number> = {};
+  preview?: string[];
+  get starting() { return !!this.waking || this.dormant; }
   get closed() { return this.dead; }
   private footerRevision = 0;
   private footerKey = "";
@@ -29,7 +33,7 @@ export class ChildSession {
   private footerPending = false;
   footer(width: number, theme?: string): string[] {
     const key = `${width}:${theme}:${this.footerRevision}`;
-    if (!this.dead && !this.dormant && !this.footerPending && key !== this.footerKey) {
+    if (!this.dead && !this.starting && !this.footerPending && key !== this.footerKey) {
       this.footerPending = true; this.footerKey = key;
       void this.request("footer",{width,theme}).then(lines => { this.footerLines = lines; })
         .catch(error => { this.error = String(error); })
@@ -42,6 +46,7 @@ export class ChildSession {
   private changed() { for (const listener of this.observers) listener(); }
   private remoteStreaming = false;
   private activePrompts = 0;
+  private abortEpoch = 0;
   get isStreaming() { return !this.dead && (this.remoteStreaming || this.activePrompts > 0); }
   private serial = 0;
   private dead = false;
@@ -70,6 +75,7 @@ export class ChildSession {
       } else {
         if (message.messages || message.type === "footer_dirty" || message.event?.type === "model_select") this.footerRevision++;
         if (message.messages) this.messages = message.messages;
+        if (message.preview) this.preview = message.preview;
         if (typeof message.streaming === "boolean") this.remoteStreaming = message.streaming;
         if (message.type === "event") {
           if (message.event.type === "message_update") this.partial = message.event.message;
@@ -108,17 +114,24 @@ export class ChildSession {
     this.waking = (async () => {
       let timer: ReturnType<typeof setTimeout> | undefined;
       try {
-        await Promise.race([this.request("init", {config}),new Promise<never>((_resolve,reject) => {
+        const started = performance.now();
+        this.startupTimings = await Promise.race([this.request("init", {config}),new Promise<never>((_resolve,reject) => {
           timer = setTimeout(() => reject(new Error("BTW startup timed out")),60_000); timer.unref();
         })]);
+        this.startupTimings.total = performance.now() - started;
       } catch (error) { this.dispose(); throw error; }
-      finally { clearTimeout(timer); this.waking = undefined; }
+      finally { clearTimeout(timer); this.waking = undefined; this.changed(); }
     })();
     return this.waking;
   }
   async prompt(text: string, _options?: unknown) {
+    const epoch = this.abortEpoch;
     this.error = ""; this.activePrompts++; this.changed();
-    try { await this.ensureStarted(); await this.request("prompt", { text }); }
+    try {
+      await this.ensureStarted();
+      if (epoch !== this.abortEpoch) throw new Error("BTW prompt cancelled during startup");
+      await this.request("prompt", { text });
+    }
     finally { this.activePrompts--; this.changed(); }
   }
   async snapshot(): Promise<Capture> {
@@ -127,7 +140,7 @@ export class ChildSession {
     return { ...capture, manager: SessionManager.open(file) };
   }
   async merge(message: unknown) { await this.ensureStarted(); return this.request("merge", { message }); }
-  abort() { return this.dormant ? Promise.resolve() : this.request("abort"); }
+  abort() { this.abortEpoch++; return this.starting ? Promise.resolve() : this.request("abort"); }
   subscribe(listener: (event: AgentSessionEvent) => void) {
     this.listeners.add(listener); return () => { this.listeners.delete(listener); };
   }
@@ -142,20 +155,17 @@ export class ChildSession {
   }
 }
 
-export async function startChild(capture: Capture) {
-  const session = new ChildSession(capture.cwd);
+export function prepareChild(capture: Capture) {
   const { manager, origin: _origin, boundary: _boundary, pendingCount: _pending, ...config } = capture;
-  let timeout: ReturnType<typeof setTimeout> | undefined;
-  try {
-    await Promise.race([
-      session.request("init", { config: { ...config, file: manager.getSessionFile()! } }),
-      new Promise<never>((_resolve, reject) => {
-        timeout = setTimeout(() => reject(new Error("BTW startup timed out")), 60_000);
-        timeout.unref();
-      }),
-    ]);
-    return { ...capture, session };
-  } catch (error) { session.dispose(); throw error; }
-  finally { clearTimeout(timeout); }
+  const session = new ChildSession(capture.cwd,{...config,file:manager.getSessionFile()!});
+  session.messages = manager.buildSessionContext().messages;
+  const child = { ...capture, session };
+  primePreview(child);
+  return child;
+}
+export async function startChild(capture: Capture) {
+  const child = prepareChild(capture);
+  await child.session.ensureStarted();
+  return child;
 }
 export type Child = Awaited<ReturnType<typeof startChild>>;

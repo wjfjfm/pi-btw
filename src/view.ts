@@ -15,7 +15,7 @@ export class BtwView {
   private preview?: { messages: Tab["child"]["session"]["messages"]; lines: string[] };
   private error = "";
   private cache?: { width: number; lines: string[] };
-  private history?: { width: number; messages: Tab["child"]["session"]["messages"]; lines: string[] };
+  private history?: { width: number; messages: Tab["child"]["session"]["messages"]; start: number; lines: string[] };
   constructor(private tui: TUI, private theme: Theme, private tab: Tab,
     private act: (action: ViewAction) => void, private submit: (text: string) => Promise<void>) {
     this.editor = new Editor(tui, { borderColor: text => theme.fg("accent", text), selectList: getSelectListTheme() });
@@ -79,6 +79,13 @@ export class BtwView {
     }
     return components.flatMap(component => component.render(Math.max(4,width)));
   }
+  private renderHistory(width: number, count: number) {
+    const messages = this.tab.child.session.messages;
+    let start = Math.max(0,messages.length-count);
+    // Do not split a tool result from its assistant tool-call batch.
+    while (start > 0 && messages[start]?.role === "toolResult") start--;
+    this.history = {width,messages,start,lines:this.transcript(width,messages.slice(start))};
+  }
   render(width: number): string[] {
     const height = Math.max(4,this.tui.terminal.rows);
     const session = this.tab.child.session;
@@ -94,15 +101,21 @@ export class BtwView {
     const room = Math.max(0,height-editor.length-footer.length-status.length-1);
     if (!this.cache || this.cache.width !== width) {
       if (!this.history || this.history.width !== width || this.history.messages !== session.messages)
-        this.history = {width,messages:session.messages,lines:this.transcript(width,session.messages)};
-      this.cache = {width,lines:[...this.history.lines,...(session.partial ? this.transcript(width,[session.partial]) : [])]};
+        this.renderHistory(width,40);
+      this.cache = {width,lines:[...this.history!.lines,...(session.partial ? this.transcript(width,[session.partial]) : [])]};
+    }
+    // Render only the visible tail initially. Older history is loaded on PageUp,
+    // not eagerly formatted (including all tools/Markdown) on every message.
+    while (this.history!.start > 0 && this.offset + room > this.cache.lines.length) {
+      this.renderHistory(width,(session.messages.length-this.history!.start)*2);
+      this.cache = {width,lines:[...this.history!.lines,...(session.partial ? this.transcript(width,[session.partial]) : [])]};
     }
     const lines = this.cache.lines;
     this.offset = Math.min(this.offset,Math.max(0,lines.length-room));
     const end = lines.length-this.offset;
     const body = lines.slice(Math.max(0,end-room),end);
     while (body.length < room) body.push("");
-    return [this.theme.fg("accent",`当前：BTW ${this.tab.id} · 来源：${this.tab.source ? `BTW ${this.tab.source}` : "main"} · ${session.closed ? "closed" : session.isStreaming ? "running" : "idle"}`),
+    return [this.theme.fg("accent",`当前：BTW ${this.tab.id} · 来源：${this.tab.source ? `BTW ${this.tab.source}` : "main"} · ${session.closed ? "closed" : session.starting ? "starting…" : session.isStreaming ? "running" : "idle"}`),
       ...body,...footer,...editor,...status].map(line => truncateToWidth(line,width));
   }
 }

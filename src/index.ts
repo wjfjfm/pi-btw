@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { hasMergeReceipt, watchMergeReceipt } from "./merge-receipt.js";
+import { mergeReceiptCheck, watchMergeReceipt } from "./merge-receipt.js";
 import { SessionManager, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { captureChild, startChild } from "./child.js";
+import { captureChild, prepareChild } from "./child.js";
 import { rawConversation } from "./snapshot.js";
 import { BtwView, type ViewAction } from "./view.js";
 import { ListDialog, type ListAction } from "./list-dialog.js";
@@ -59,12 +59,12 @@ export default function btw(pi: ExtensionAPI) {
     const version = generation, source = workspace.current;
     try {
       const capture = source ? await workspace.tabs.get(source)!.child.session.snapshot() : captureChild(pi,ctx,partial);
-      const child = await startChild(capture);
+      const child = prepareChild(capture);
       if (version !== generation) { child.session.dispose(); return; }
       const tab = workspace.add(child,source);
       save();
       ctx.ui.notify(`BTW ${tab.id} forked from ${source || "main"}: ${child.manager.getSessionFile()}`,"info");
-      if (prompt) void child.session.prompt(prompt).catch(e => error(ctx,e));
+      void (prompt ? child.session.prompt(prompt) : child.session.ensureStarted()).catch(e => error(ctx,e));
     } finally { creating = false; }
   }
   function selected() {
@@ -86,7 +86,8 @@ export default function btw(pi: ExtensionAPI) {
       new MergeDialog(tui,theme,tab.id,targets,destination,done),
       {overlay:true,overlayOptions:{width:76,maxHeight:"100%"}});
     if (!options || version !== generation) return;
-    await merge(tab,options,ctx);
+    // Keep the BTW view and Esc usable while the summary model is running.
+    void merge(tab,options,ctx).catch(e => { tab.notice = String(e); error(ctx,e); });
   }
   async function merge(tab: Tab, options: MergeOptions, ctx: ExtensionContext) {
     const {destination} = options;
@@ -104,6 +105,8 @@ export default function btw(pi: ExtensionAPI) {
     const version = generation;
     try {
       summaryAbort = new AbortController();
+      tab.notice = options.summary ? "BTW: generating summary (model request)…" : "BTW: preparing merge…";
+      ctx.ui.notify(tab.notice,"info");
       const content = await mergeContent(rawConversation(manager,tab.child.boundary),mode,ctx,summaryAbort.signal);
       if (version !== generation || ctx.sessionManager.getSessionId() !== parentId) throw new Error("Main session changed; merge cancelled");
       requireDestination(destination,tab.id);
@@ -137,11 +140,12 @@ export default function btw(pi: ExtensionAPI) {
         save();
         ctx.ui.notify(tab.notice,"info");
       };
-      if (hasMergeReceipt(targetFile,mergeId)) settle(true);
+      const checkReceipt = mergeReceiptCheck(targetFile,mergeId);
+      if (checkReceipt()) settle(true);
       else {
         tab.notice = `BTW ${tab.id}: merge queued; waiting for target receipt (source retained)`;
         ctx.ui.notify(tab.notice,"info");
-        pendingMerges.set(pendingKey,watchMergeReceipt(() => hasMergeReceipt(targetFile,mergeId),settle));
+        pendingMerges.set(pendingKey,watchMergeReceipt(checkReceipt,settle));
       }
     } finally { merging = false; summaryAbort = undefined; }
   }
@@ -191,7 +195,7 @@ export default function btw(pi: ExtensionAPI) {
     try {
       while (workspace.current && version === generation) {
         const tab = selected();
-        try { await tab.child.session.ensureStarted(); } catch (e) { tab.notice = String(e); }
+        void tab.child.session.ensureStarted().catch(e => { tab.notice = String(e); error(ctx,e); });
         if (version !== generation) break;
         const action = await ctx.ui.custom<ViewAction>((tui,theme,_keys,done) => {
           finish = done;
