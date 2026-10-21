@@ -158,6 +158,10 @@ export default function btw(pi: ExtensionAPI) {
         const tab = workspace.tabs.get(choice.id);
         if (!tab) throw new Error("Source BTW is closed");
         await chooseMerge(tab,0,ctx);
+      } else if (choice.kind === "close") {
+        if (!choice.id) throw new Error("Cannot close main");
+        if (merging || creating) throw new Error("BTW operation in progress");
+        workspace.close(choice.id); save();
       } else if (!choice.id || workspace.tabs.has(choice.id)) workspace.current = choice.id;
       return;
     }

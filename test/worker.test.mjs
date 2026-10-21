@@ -195,7 +195,8 @@ test('extension merges only explicitly, queues follow-up, prevents duplicates, a
   assert.match(await readFile(forkedFile,'utf8'),/first question/);
   listSelection={kind:'switch',id:2};
   await command('list');
-  await command('close'); // no confirmation interaction
+  listSelection={kind:'close',id:2};
+  await command('list'); // close shortcut needs no confirmation interaction
   assert.equal(JSON.parse(await readFile(workspaceFile(parent),'utf8')).tabs.length,0);
   assert.equal(await readFile(originalBtwFile,'utf8'),originalBtw);
   await command('merge');assert.match(notices.at(-1).message,/Select a BTW/);

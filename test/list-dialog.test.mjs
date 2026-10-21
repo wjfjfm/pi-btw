@@ -16,6 +16,16 @@ test('list m merges highlighted BTW directly, Enter switches, Esc cancels',()=>{
   const switched=fixture();switched.dialog.handleInput('\r');assert.deepEqual(switched.results,[{kind:'switch',id:1}]);
   const cancelled=fixture();cancelled.dialog.handleInput('\x1b');assert.deepEqual(cancelled.results,[undefined]);
 });
+test('c closes highlighted BTW directly, including closed workers, but never main',()=>{
+  for(const id of [1,2]){
+    const {dialog,results}=fixture(id);
+    assert.match(dialog.render(100).join('\n'),/c close/);
+    dialog.handleInput('c');
+    assert.deepEqual(results,[{kind:'close',id}]);
+  }
+  const {dialog,results}=fixture(0);dialog.handleInput('c');
+  assert.equal(results.length,0);assert.match(dialog.render(100).join('\n'),/Cannot close main/);
+});
 test('main and closed BTW cannot merge; arrow navigation changes source',()=>{
   const {dialog,results}=fixture(0);
   dialog.handleInput('m');assert.equal(results.length,0);

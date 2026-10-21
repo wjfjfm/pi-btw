@@ -1,7 +1,7 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { SelectList, truncateToWidth, type TUI } from "@earendil-works/pi-tui";
 
-export interface ListAction { kind: "switch" | "merge"; id: number }
+export interface ListAction { kind: "switch" | "merge" | "close"; id: number }
 export class ListDialog {
   private list: SelectList;
   private notice = "";
@@ -27,12 +27,18 @@ export class ListDialog {
         this.done({kind:"merge",id:Number(item.value)}); return;
       }
       this.notice = "Select an available BTW to merge";
+    } else if (data === "c" || data === "C") {
+      const item = this.list.getSelectedItem();
+      if (item && Number(item.value) !== 0) {
+        this.done({kind:"close",id:Number(item.value)}); return;
+      }
+      this.notice = "Cannot close main";
     } else this.list.handleInput(data);
     this.tui.requestRender();
   }
   render(width: number) {
     return [this.theme.fg("accent","BTW sessions"),"",...this.list.render(width),"",
-      this.theme.fg("dim","↑↓ navigate · Enter switch · m merge · Esc cancel"),
+      this.theme.fg("dim","↑↓ navigate · Enter switch · m merge · c close · Esc cancel"),
       ...(this.notice ? [this.theme.fg("warning",this.notice)] : []),
     ].map(line=>truncateToWidth(line,width));
   }
