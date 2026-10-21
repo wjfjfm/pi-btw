@@ -18,6 +18,18 @@ test('creation-order cycling includes main; closing source preserves descendants
   w.dispose();assert.equal(disposed,4);assert.equal(w.current,0);
 });
 
+test('closing the current nested or later BTW returns to main, not the previous BTW',()=>{
+  const w=new Workspace();
+  const disposed=[];
+  const child=id=>({session:{dispose(){disposed.push(id);},closed:false}});
+  const a=w.add(child(1)),b=w.add(child(2)),c=w.add(child(3));
+  w.close(c.id);
+  assert.equal(w.current,0);assert.ok(w.tabs.has(a.id));assert.ok(w.tabs.has(b.id));
+  w.current=b.id;
+  w.close(a.id);assert.equal(w.current,b.id,'closing a background branch must not steal focus');
+  w.close(b.id);assert.equal(w.current,0);
+  assert.deepEqual(disposed,[3,1,2]);
+});
 test('list is a source tree rather than creation order and preserves ID selection',()=>{
   const w=new Workspace();
   const child=()=>({session:{dispose(){},closed:false,dormant:false,isStreaming:false}});

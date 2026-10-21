@@ -54,7 +54,7 @@ export class Workspace {
   close(id: number) {
     const tab = this.tabs.get(id);
     if (!tab) return;
-    if (this.current === id) this.move(-1);
+    if (this.current === id) this.current = 0;
     this.tabs.delete(id); tab.child.session.dispose();
   }
   dispose() {
