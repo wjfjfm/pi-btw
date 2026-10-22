@@ -1,3 +1,4 @@
+import { statSync } from "node:fs";
 import type { Child } from "./child.js";
 import { childPreview, sessionPreview, inlinePreview } from "./preview.js";
 
@@ -22,9 +23,35 @@ export class Workspace {
   }
   listRows(main?: Parameters<typeof sessionPreview>[0], dim?: (text: string) => string) {
     const rows = [{id:0,label:"main" + (main ? inlinePreview(sessionPreview(main),dim) : "")}];
+    const children = new Map<number,Tab[]>();
+    const own = new Map<number,{time:number; id:number}>();
+    for (const tab of this.tabs.values()) {
+      const siblings = children.get(tab.source) ?? [];
+      siblings.push(tab); children.set(tab.source,siblings);
+      let time = Math.max(tab.child.origin?.createdAt ?? 0,tab.child.session.lastActivity ?? 0);
+      const file = tab.child.manager?.getSessionFile();
+      if (file) { try { time = Math.max(time,statSync(file).mtimeMs); } catch {} }
+      own.set(tab.id,{time,id:tab.id});
+    }
+    const ranks = new Map<number,{time:number; id:number}>();
+    const ranking = new Set<number>();
+    const newer = (a: {time:number; id:number}, b: {time:number; id:number}) => a.time-b.time || a.id-b.id;
+    const rank = (id: number): {time:number; id:number} => {
+      if (ranks.has(id)) return ranks.get(id)!;
+      let latest = own.get(id)!;
+      if (ranking.has(id)) return latest; // Defensive support for legacy cycles.
+      ranking.add(id);
+      for (const child of children.get(id) ?? []) {
+        const descendant = rank(child.id);
+        if (newer(descendant,latest) > 0) latest = descendant;
+      }
+      ranking.delete(id); ranks.set(id,latest);
+      return latest;
+    };
+    for (const tab of this.tabs.values()) rank(tab.id);
     const visited = new Set<number>();
     const walk = (tabs: Tab[], prefix: string) => {
-      tabs.forEach((tab,index) => {
+      tabs.sort((a,b) => newer(rank(b.id),rank(a.id)) || b.id-a.id).forEach((tab,index) => {
         if (visited.has(tab.id)) return;
         visited.add(tab.id);
         const last = index === tabs.length - 1;
@@ -32,7 +59,7 @@ export class Workspace {
         const source = tab.source || "main";
         const preview = inlinePreview(childPreview(tab.child),dim);
         rows.push({id:tab.id,label:`${prefix}${last ? "└─" : "├─"} BTW ${tab.id} · source ${source}${tab.source && !this.tabs.has(tab.source) ? " (closed)" : ""} · ${status}${preview}`});
-        walk([...this.tabs.values()].filter(child => child.source === tab.id && !visited.has(child.id)),prefix + (last ? "   " : "│  "));
+        walk((children.get(tab.id) ?? []).filter(child => !visited.has(child.id)),prefix + (last ? "   " : "│  "));
       });
     };
     walk([...this.tabs.values()].filter(tab => !tab.source || !this.tabs.has(tab.source)),"");

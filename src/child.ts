@@ -25,6 +25,7 @@ export class ChildSession {
   error = "";
   startupTimings: Record<string,number> = {};
   preview?: string[];
+  lastActivity = 0;
   get starting() { return !!this.waking || this.dormant; }
   get closed() { return this.dead; }
   private footerRevision = 0;
@@ -78,6 +79,7 @@ export class ChildSession {
         if (message.preview) this.preview = message.preview;
         if (typeof message.streaming === "boolean") this.remoteStreaming = message.streaming;
         if (message.type === "event") {
+          if (["message_start","message_update","message_end"].includes(message.event.type)) this.lastActivity = Date.now();
           if (message.event.type === "message_update") this.partial = message.event.message;
           if (message.event.type === "message_end") this.partial = undefined;
           for (const listener of this.listeners) listener(message.event);
@@ -126,6 +128,7 @@ export class ChildSession {
   }
   async prompt(text: string, _options?: unknown) {
     const epoch = this.abortEpoch;
+    this.lastActivity = Date.now();
     this.error = ""; this.activePrompts++; this.changed();
     try {
       await this.ensureStarted();
