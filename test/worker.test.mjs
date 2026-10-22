@@ -156,6 +156,8 @@ test('extension merges only explicitly, queues steering, prevents duplicates, an
   assert.match(sent[0].message.content, /first question/);
   assert.equal(sent[0].options.deliverAs, 'steer');
   assert.equal(sent[0].options.triggerTurn, true);
+  listSelection={kind:'switch',id:1};
+  await command('list');
   await command('merge');
   assert.equal(sent.length, 1);
   assert.match(notices.at(-1).message, /already been merged/);
@@ -168,7 +170,7 @@ test('extension merges only explicitly, queues steering, prevents duplicates, an
   await commands.get('btw')('merge',ctx);
   assert.equal(sent.length,1,'command returns while summary is still pending');
   assert.match(notices.at(-1).message,/generating summary/);
-  assert.ok(summaryFinish);summaryFinish();holdSummary=false;
+  await waitFor(()=>!!summaryFinish);summaryFinish();holdSummary=false;
   await waitFor(()=>sent.length===2);
   assert.equal(sent.length, 2, JSON.stringify(notices));
   assert.match(sent[1].message.content, /merged summary/);
@@ -191,7 +193,8 @@ test('extension merges only explicitly, queues steering, prevents duplicates, an
   const mergedSource=SessionManager.open(forkedFile).getBranch().filter(e=>e.type==='custom_message'&&e.customType==='pi-btw-merge');
   assert.equal(mergedSource.length,1);assert.equal(mergedSource[0].details.mode,'conversation');
   assert.equal(await readFile(originalBtwFile,'utf8'),originalBtw,'merge must preserve original BTW');
-  listSelection=undefined;
+  assert.equal(shownTab.id,1,'merge focuses the child target');
+  listSelection={kind:'switch',id:0};
   await command('list');
   await command('merge');assert.match(notices.at(-1).message,/Select a BTW/);
   // Default close is applied only after delivery, removes the manifest item, and preserves the file.
@@ -208,10 +211,12 @@ test('extension merges only explicitly, queues steering, prevents duplicates, an
   // Queue acceptance alone must NOT mark merged or close the source.
   let queued;
   pi.sendMessage=(message,options)=>{queued={message,options};sent.push(queued);};
+  await command('list'); // reselect source after failed delivery left focus at main
   await command('merge');
   assert.equal(sent.length,3,JSON.stringify(notices));
   assert.match(notices.at(-1).message,/waiting for target receipt/);
   assert.ok(JSON.parse(await readFile(workspaceFile(parent),'utf8')).tabs.some(tab=>tab.id===1));
+  await command('list');
   await command('merge');assert.equal(sent.length,3,'pending delivery prevents duplicate sends');
   parent.appendCustomMessageEntry(queued.message.customType,queued.message.content,true,queued.message.details);
   await new Promise(r=>setTimeout(r,650));

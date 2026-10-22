@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { setImmediate as yieldToUI } from "node:timers/promises";
 import { mergeReceiptCheck, watchMergeReceipt } from "./merge-receipt.js";
 import { SessionManager, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { captureChild, prepareChild } from "./child.js";
@@ -91,7 +92,7 @@ export default function btw(pi: ExtensionAPI) {
       new MergeDialog(tui,theme,tab.id,targets,destination,done),
       {overlay:true,overlayOptions:{width:76,maxHeight:"100%"}});
     if (!options || version !== generation) return;
-    // Keep the BTW view and Esc usable while the summary model is running.
+    // Navigation completes independently of summary generation and delivery.
     void merge(tab,options,ctx).catch(e => {
       if (version !== generation) return;
       tab.notice = String(e); error(ctx,e);
@@ -111,10 +112,15 @@ export default function btw(pi: ExtensionAPI) {
     if (tab.merged.has(destination) && tab.merged.get(destination) === leaf) throw new Error("This BTW revision has already been merged to this target");
     merging = true;
     const version = generation;
+    workspace.current = destination;
+    save();
     try {
       summaryAbort = new AbortController();
       tab.notice = options.summary ? "BTW: generating summary (model request)…" : "BTW: preparing merge…";
       ctx.ui.notify(tab.notice,"info");
+      // Let the command/show loop open the target before formatting branch history.
+      await yieldToUI();
+      if (version !== generation) return;
       const content = await mergeContent(rawConversation(manager,tab.child.boundary),mode,ctx,summaryAbort.signal);
       if (version !== generation || ctx.sessionManager.getSessionId() !== parentId) throw new Error("Main session changed; merge cancelled");
       requireDestination(destination,tab.id);
