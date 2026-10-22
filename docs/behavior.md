@@ -63,7 +63,7 @@ Conversation:       Strip
 
 - **Close current btw**：确认目标当前分支已落盘本次 merge 后，才关闭所选源 BTW 并从列表移除，保留会话文件与其后代；No 则保留源 BTW。
 - **Summary**：Yes 使用原生 tree 摘要，No 不请求摘要模型。
-- **Conversation**：Full 保留完整原文（含 thinking、工具调用与结果）；Strip 仅保留用户/助手正文、图片及可见 custom 消息；None 不附对话。
+- **Conversation**：Full 保留完整对话内容（含 thinking、工具调用与结果）；Strip 仅保留用户/助手正文、图片及可见 custom 消息；None 不附对话。两者均按角色分段，不直接注入会话存储 JSONL。
 - Summary No + Conversation None 没有可合并内容，弹窗会阻止确认。取消、摘要失败、投递失败或确认超时均不关闭源 BTW。
 
 不提供 `/merge` 或 `/main` 命令。主界面可通过 `/btw list → 高亮 BTW → m` 合并已有 BTW。
@@ -94,7 +94,9 @@ SDK 子进程显式初始化 Pi 的 HTTP 代理及超时配置，支持环境变
 
 运行中也可以 fork。未完成工具在子会话内补明确的快照边界错误结果，不重放、不取消源工具；未完成流式响应作为观察记录附加到子会话。
 
-完整模式包含 fork 后当前分支的完整原文 JSONL，不截断，保留新增消息、工具结果、图片原始数据及摘要记录，不重复包含 fork 前历史。conversation 使用过滤后的 JSONL 保存正文与图片，不额外请求模型。Summary Yes 复用 Pi `/tree` 的 `generateBranchSummary()`，使用原生 prompt、预算和文件清单策略；原生摘要预处理省略工具结果，并可能按预算舍弃较旧消息。摘要失败或取消不合并。
+合并只取 fork 后当前分支，不重复包含继承历史。Full/Strip 将对话格式化为 User、Assistant、Note 等分段，保留正文换行；去除存储 type/id/parentId/timestamp、模型/供应商、usage/费用及系统配置。Full 额外保留 thinking、工具参数/结果及 details、错误状态、隐藏 custom 正文、分支和压缩摘要；工具调用用本次合并内的 #1、#2 编号与结果关联，参数使用缩进 JSON，工具输出使用代码块。图片作为原生 image block 传递，不把 base64 当文本注入。原始 JSONL 留在会话文件，不修改；已有合并消息不会被追溯重写。上述整理不请求模型、不截断对话内容。
+
+Summary Yes 复用 Pi `/tree` 的 `generateBranchSummary()`，使用原生 prompt、预算和文件清单策略；原生摘要预处理省略工具结果，并可能按预算舍弃较旧消息。摘要失败或取消不合并。
 
 合并以可见 custom message 发送，使用 steer 排队，不取消当前工具批次，在其完成后进入下一次 API 请求。每次带唯一 merge ID，只有在目标会话文件当前分支查到该 ID 才确认成功；排队不等于送达。等待期间保留源 BTW，阻止同源同目标重复投递。两分钟未确认会提示超时并保留源，迟到的消息仍可能被目标消费，重试前请检查目标。关闭/重载会停止确认监控，未确认源仍保留在工作区，不自动重发。无持久化目标文件时无法确认，保守地保留源。即使已确认，若源在等待期间新增消息、正在运行或有草稿，也不会自动关闭。每个目标分别防止同一 revision 重复合并；后续合并包含 fork 后全部对话，而非增量。不修改或删除原始对话文件，也不自动切换到目标。Close current btw 默认 Yes；关闭当前焦点 BTW 后直接回到 main；关闭后台 BTW 不改变当前焦点。
 

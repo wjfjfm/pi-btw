@@ -106,7 +106,7 @@ test('empty and unflushed in-memory sessions fork into durable independent files
   assert.equal(rawConversation(fork.manager, fork.boundary), '');
 });
 
-test('full merge keeps exact new messages, images and tool results despite context edits', t => {
+test('raw branch extraction keeps exact new messages, images and tool results despite context edits', t => {
   const { cwd, parent } = setup(t);
   parent.appendMessage(user('inherited'));
   const fork = forkSnapshot(parent, cwd);

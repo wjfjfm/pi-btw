@@ -43,7 +43,7 @@ Conversation:       Strip
 
 - **Merge to**：main 或其他 BTW；`/btw merge source` 预选直接来源。
 - **Summary**：是否生成摘要。
-- **Conversation**：Full 保留 thinking、工具调用与结果；Strip 只保留正文、图片和可见消息；None 不附对话。
+- **Conversation**：Full 保留正文、thinking、工具调用与结果；Strip 只保留正文、图片和可见消息；None 不附对话。Full/Strip 均按角色分段，去掉存储元数据，图片作为原生图片传递。
 - **Close current btw**：目标确认落盘后才关闭源分支，始终保留原始会话文件。
 
 目标忙时通过 steer 排队，在当前工具批次结束后进入下一次 API 请求。失败或两分钟未确认，源分支保留；等待期间源有新消息、运行任务或草稿，也不会自动关闭。超时不代表队列已取消，重试前请检查目标。

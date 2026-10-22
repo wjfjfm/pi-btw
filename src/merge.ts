@@ -1,4 +1,5 @@
 import { generateBranchSummary, type ExtensionContext, type SessionEntry } from "@earendil-works/pi-coding-agent";
+import { transcript, prefixContent } from "./transcript.js";
 
 export const MERGE_MODES = [
   {id:"summary",label:"summary"},
@@ -10,25 +11,17 @@ export const MERGE_MODES = [
 
 /** Preserve dialogue text/images, not hidden reasoning or tool protocol. */
 export function conversation(entries: SessionEntry[]) {
-  return entries.flatMap(entry => {
-    const message = entry.type === "message" ? entry.message
-      : entry.type === "custom_message" && entry.display ? {role:"user",content:entry.content} : undefined;
-    if (!message || (message.role !== "user" && message.role !== "assistant")) return [];
-    const content = typeof message.content === "string" ? message.content
-      : message.content.filter(block => block.type === "text" || block.type === "image");
-    if (!content.length) return [];
-    return [JSON.stringify({role:message.role,content})];
-  }).join("\n");
+  return transcript(entries,false);
 }
 
 export async function mergeContent(raw: string, mode: string, ctx: Pick<ExtensionContext, "model" | "modelRegistry">, signal?: AbortSignal) {
   if (!MERGE_MODES.some(option => option.id === mode)) throw new Error("Invalid merge mode");
   if (!raw) throw new Error("No BTW conversation to merge");
-  if (mode === "full") return raw;
   const entries: SessionEntry[] = raw.split("\n").filter(Boolean).map(line => JSON.parse(line));
-  const dialogue = conversation(entries);
-  if (mode === "conversation") {
-    if (!dialogue) throw new Error("No dialogue text or images to merge");
+  const full = mode === "full" || mode === "summary-with-full";
+  const dialogue = mode === "summary" ? "" : transcript(entries,full);
+  if (mode === "conversation" || mode === "full") {
+    if (!dialogue.length) throw new Error("No dialogue text or images to merge");
     return dialogue;
   }
   if (!ctx.model) throw new Error("No model selected for summary");
@@ -47,5 +40,5 @@ export async function mergeContent(raw: string, mode: string, ctx: Pick<Extensio
   if (result.error) throw new Error(result.error);
   if (!hasSummaryText || !result.summary?.trim()) throw new Error("Empty summary; nothing merged");
   if (mode === "summary") return result.summary;
-  return `## Summary\n\n${result.summary}\n\n## Conversation (JSONL)\n\n${mode === "summary-with-full" ? raw : dialogue}`;
+  return prefixContent(`## Summary\n\n${result.summary}\n\n# Conversation\n\n`,dialogue);
 }
