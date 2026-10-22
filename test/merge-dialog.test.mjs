@@ -9,11 +9,11 @@ function fixture() {
   const key=(...keys)=>keys.forEach(k=>dialog.handleInput(k));
   return {dialog,key,results};
 }
-test('merge dialog defaults to OK and main/Yes/Yes/Strip, with Cancel next',()=>{
+test('merge dialog defaults to OK and main/Yes/No/Strip, with Cancel next',()=>{
   const {dialog,key,results}=fixture();
   assert.match(dialog.render(80).join('\n'),/\[OK\]/);
   key('\r');
-  assert.deepEqual(results,[{destination:0,close:true,summary:true,conversation:'Strip'}]);
+  assert.deepEqual(results,[{destination:0,close:true,summary:false,conversation:'Strip'}]);
   const cancelled=fixture();cancelled.key('\t','\r');
   assert.deepEqual(cancelled.results,[undefined]);
   const escaped=fixture();escaped.key('\x1b');assert.deepEqual(escaped.results,[undefined]);
@@ -22,7 +22,7 @@ test('fields cycle, invalid empty merge stays open, rendering fits narrow termin
   const {dialog,key,results}=fixture();
   key('\t','\t','\x1b[C'); // target BTW 2
   key('\t',' '); // close No
-  key('\t',' '); // summary No
+  key('\t',' ',' '); // summary Yes, then back to default No
   key('\t','\x1b[C'); // conversation None
   key('\t','\r'); // OK rejected
   assert.equal(results.length,0);

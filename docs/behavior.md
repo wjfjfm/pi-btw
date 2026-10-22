@@ -53,7 +53,7 @@ BTW 不注册全局快捷键；统一通过 `/btw list` 切换会话，Esc 返�
 ```text
 Merge to:           main
 Close current btw:  Yes
-Summary:            Yes
+Summary:            No
 Conversation:       Strip
 
 [OK]  Cancel

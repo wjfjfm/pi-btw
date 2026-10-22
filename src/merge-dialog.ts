@@ -22,7 +22,7 @@ export class MergeDialog {
   constructor(private tui: Pick<TUI,"requestRender">, private theme: Theme,
     private source: number, private targets: {id:number;label:string}[],
     destination: number, private done: (result: MergeOptions | undefined) => void) {
-    this.options = {destination,close:true,summary:true,conversation:"Strip"};
+    this.options = {destination,close:true,summary:false,conversation:"Strip"};
   }
   invalidate() {}
   handleInput(data: string) {
