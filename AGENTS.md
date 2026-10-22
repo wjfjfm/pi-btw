@@ -1,0 +1,52 @@
+# pi-btw 维护指南
+
+## 文档约定
+
+- **README 必须绝对精简，面向使用者。**只保留用途、基本操作、必要安全提醒和运行方法。
+- 不向 README 添加实现方式、数据格式、队列/回执机制、性能数字、缓存、存储目录、测试报告或逐功能更新说明。
+- 开发与维护信息写在本文件；较长的专项说明放在 `docs/`，从这里链接，不扩充 README。
+- 修改行为时同步技术文档，避免把历史实现当作当前契约。
+
+## 技术文档
+
+- [行为与限制](docs/behavior.md)：命令、弹窗选项、持久化、快照、投递语义和运行时边界。
+- [大会话性能](docs/performance.md)：基准脚本、测量结果、优化方式和剩余瓶颈。
+
+## 代码导航
+
+- `src/index.ts`：命令、视图生命周期、分支创建、合并编排和回执后关闭。
+- `src/child.ts` / `src/worker.ts`：独立 Node 子进程与真实 Pi SDK，通过 IPC 通信；父进程只管理状态和显示。
+- `src/snapshot.ts`：当前分支快照、运行中工具封口、fork 边界及原始记录提取。
+- `src/workspace.ts`：分支树、焦点、来源关系、排序及关闭。
+- `src/persistence.ts`：工作区 sidecar、草稿及懒恢复。
+- `src/merge.ts` / `src/transcript.ts`：原生分支摘要、可读对话整理及原生图片块。
+- `src/merge-receipt.ts`：目标当前分支的落盘确认与超时监控。
+- `src/view.ts` / `src/preview.ts`：原生消息组件、按需历史渲染、首末正文预览。
+- `src/list-dialog.ts` / `src/merge-dialog.ts`：列表快捷键和统一合并弹窗。
+- `src/footer.ts` / `src/network.ts`：原生状态栏和 SDK 网络配置。
+
+## 不得破坏的行为
+
+- 未使用 BTW 时不添加模型工具或上下文；只有显式合并才回注结果。
+- 分支继承当前有效历史，包括 context edits 和 compaction，不修改父会话。运行中工具不重放、不取消，用明确的快照错误结果封口。
+- 分支安全提示延迟到首次用户提问，与该提问进入同一次请求；不独立触发回答，不随 merge 回传。
+- 子进程后台初始化，先显示窗口；初始化期间可输入或取消。切换不暂停后台任务。
+- 列表 main 置顶，保留来源树。每组按自身及全部后代的最新活动倒序，时间相同按最新分支 ID 优先。运行中消息活动及已落盘文件 mtime 都参与排序；排序不得改变当前焦点。
+- Full/Strip 都注入可读对话，不直接注入存储 JSONL。去除记录 ID、parentId、timestamp、usage、模型标识及系统配置，保留正文换行。
+- Full 额外保留 thinking、工具参数/结果及 details、错误状态、隐藏 custom 正文和摘要。工具调用/结果用局部编号关联；图片用原生 image block，不把 base64 当文本发送。
+- Summary 使用原生 `generateBranchSummary()`；失败或空摘要不投递。摘要后台生成，窗口和 Esc 保持可用。
+- 合并默认 main / Close Yes / Summary Yes / Strip。发送使用 steer，不等待目标整轮回答。
+- **入队不等于合并成功。**必须在目标会话当前分支查到唯一 merge ID 的落盘记录，才标记合并并考虑关闭源。两分钟超时保留源，不自动重发；迟到投递仍可能发生。
+- 即便确认成功，源有新消息、运行任务或草稿时也保留。源文件始终保留，关闭父分支不关闭后代。
+- 关闭当前分支直接回 main，不二次确认；关闭后台分支不抢焦点。无前后切换快捷键，Ctrl+B/F 留给原生编辑器。
+- 每个 BTW 的 session 文件存于 `btw-sessions/`，避免污染原生 continue/resume；工作区存于 `btw-workspaces/`，原子写入、权限 0600。恢复不自动续跑任务。
+- 分支共享文件系统与外部服务，不是工作区隔离。不要把独立进程描述为完整运行时克隆。
+
+## 性能与验证
+
+- 首屏只格式化末尾历史，PageUp 再加载更早记录；不能为了渲染性能截断持久化历史或模型上下文。
+- 预览不调用模型。活动 worker 推送短预览；静态文件缓存需正确失效。不要在每次渲染或轮询时重解析未变化的大文件。
+- `npm test` 构建并运行测试；功能修改需覆盖安全约束和异步时序，优先等待明确条件，不依赖固定 sleep。
+- 大会话基准：`npm run build && node --max-old-space-size=8192 bench/large-session.mjs 2000`。使用隔离临时目录与模拟模型，不读取用户会话。
+- UI 变更可用独立 tmux server 与模拟 provider 验证；不要操作用户当前会话或 tmux server。
+- 宿主为 Pi 1.3.0，Node.js ≥22.19.0。worker 运行编译后的 `dist/worker.js`，部署源码时必须同步 build 产物。
