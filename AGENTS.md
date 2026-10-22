@@ -35,7 +35,7 @@
 - Full/Strip 都注入可读对话，不直接注入存储 JSONL。去除记录 ID、parentId、timestamp、usage、模型标识及系统配置，保留正文换行。
 - Full 额外保留 thinking、工具参数/结果及 details、错误状态、隐藏 custom 正文和摘要。工具调用/结果用局部编号关联；图片用原生 image block，不把 base64 当文本发送。
 - Summary 使用原生 `generateBranchSummary()`；失败或空摘要不投递。摘要后台生成，窗口和 Esc 保持可用。
-- 合并默认 main / Close Yes / Summary No / Strip。发送使用 steer，不等待目标整轮回答。
+- 合并默认 main / Close Yes / Summary No / Strip。Merge to 左右切换显示纯名称；Enter 打开完整目标树列表，选中或取消后回到弹窗，不直接合并。排除自身和关闭目标。发送使用 steer，不等待目标整轮回答。
 - **入队不等于合并成功。**必须在目标会话当前分支查到唯一 merge ID 的落盘记录，才标记合并并考虑关闭源。两分钟超时保留源，不自动重发；迟到投递仍可能发生。
 - 即便确认成功，源有新消息、运行任务或草稿时也保留。源文件始终保留，关闭父分支不关闭后代。
 - 关闭当前分支直接回 main，不二次确认；关闭后台分支不抢焦点。无前后切换快捷键，Ctrl+B/F 留给原生编辑器。

@@ -1,5 +1,5 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import { matchesKey, truncateToWidth, visibleWidth, type TUI } from "@earendil-works/pi-tui";
+import { SelectList, matchesKey, truncateToWidth, visibleWidth, type TUI } from "@earendil-works/pi-tui";
 
 export interface MergeOptions {
   destination: number;
@@ -19,13 +19,28 @@ export class MergeDialog {
   private focus = 0;
   private error = "";
   private options: MergeOptions;
+  private picker?: SelectList;
   constructor(private tui: Pick<TUI,"requestRender">, private theme: Theme,
     private source: number, private targets: {id:number;label:string}[],
     destination: number, private done: (result: MergeOptions | undefined) => void) {
     this.options = {destination,close:true,summary:false,conversation:"Strip"};
   }
-  invalidate() {}
+  invalidate() { this.picker?.invalidate(); }
+  private selectTarget() {
+    this.picker = new SelectList(this.targets.map(target => ({value:String(target.id),label:target.label})),10,{
+      selectedPrefix:text=>this.theme.fg("accent",text),selectedText:text=>this.theme.fg("accent",text),
+      description:text=>this.theme.fg("muted",text),scrollInfo:text=>this.theme.fg("dim",text),noMatch:text=>this.theme.fg("warning",text),
+    });
+    this.picker.setSelectedIndex(Math.max(0,this.targets.findIndex(target => target.id === this.options.destination)));
+    this.picker.onSelect = item => {
+      this.options.destination = Number(item.value);
+      this.picker = undefined; this.tui.requestRender();
+    };
+    this.picker.onCancel = () => { this.picker = undefined; this.tui.requestRender(); };
+  }
   handleInput(data: string) {
+    if (this.picker) { this.picker.handleInput(data); this.tui.requestRender(); return; }
+    if (this.focus === 2 && matchesKey(data,"enter")) { this.selectTarget(); this.tui.requestRender(); return; }
     if (matchesKey(data,"escape")) { this.done(undefined); return; }
     if (matchesKey(data,"tab") || matchesKey(data,"down")) this.focus = (this.focus + 1) % 6;
     else if (matchesKey(data,"shift+tab") || matchesKey(data,"up")) this.focus = (this.focus + 5) % 6;
@@ -55,13 +70,16 @@ export class MergeDialog {
       return this.focus === index ? this.theme.fg("accent",text) : text;
     };
     const button = (index:number, label:string) => this.focus === index ? this.theme.fg("accent",`[${label}]`) : ` ${label} `;
-    const lines = [this.theme.fg("accent",`Merge BTW ${this.source}`), "",
-      field(2,"Merge to:",this.targets.find(t => t.id === this.options.destination)?.label ?? "main"),
+    const lines = this.picker ? [this.theme.fg("accent",`Merge BTW ${this.source} to`), "",
+      ...this.picker.render(Math.max(1,width-4)), "",
+      this.theme.fg("dim","↑↓ navigate · Enter select · Esc back"),
+    ] : [this.theme.fg("accent",`Merge BTW ${this.source}`), "",
+      field(2,"Merge to:",this.options.destination ? `BTW ${this.options.destination}` : "main"),
       field(3,"Close current btw:",this.options.close ? "Yes" : "No"),
       field(4,"Summary:",this.options.summary ? "Yes" : "No"),
       field(5,"Conversation:",this.options.conversation), "",
       `  ${button(0,"OK")}  ${button(1,"Cancel")}`, "",
-      this.theme.fg("dim","Tab/↑↓ focus · ←→ change · Enter select · Esc cancel"),
+      this.theme.fg("dim","Tab/↑↓ focus · ←→ change · Enter target list/select · Esc cancel"),
       ...(this.error ? [this.theme.fg("error",this.error)] : []),
     ];
     if (width < 4) return lines.map(line => truncateToWidth(line,width));

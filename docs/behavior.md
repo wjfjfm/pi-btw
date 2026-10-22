@@ -59,7 +59,7 @@ Conversation:       Strip
 [OK]  Cancel
 ```
 
-默认聚焦 OK，下一个为 Cancel，再依次进入四个字段。Tab / ↑↓ 移动焦点，←→ 修改值，Enter 确认按钮或切换字段，Esc 取消。每次打开恢复上述默认值。
+默认聚焦 OK，下一个为 Cancel，再依次进入四个字段。Tab / ↑↓ 移动焦点，←→ 修改值。Merge to 字段只显示 main / BTW 编号，不带树形前缀；在该字段按 Enter 打开带层级、状态和预览的目标列表，默认高亮已选目标，↑↓ 选择、Enter 选中并返回弹窗，Esc 返回且保留原目标。列表支持滚动，不包含源 BTW 或已关闭目标。选择目标不会确认合并。其他字段用 Enter 切换，按钮用 Enter 确认；主弹窗 Esc 取消。每次打开恢复上述默认值。
 
 - **Close current btw**：确认目标当前分支已落盘本次 merge 后，才关闭所选源 BTW 并从列表移除，保留会话文件与其后代；No 则保留源 BTW。
 - **Summary**：Yes 使用原生 tree 摘要，No 不请求摘要模型。
