@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "
 import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { SessionManager, type ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { ChildSession, type Capture, type WorkerConfig } from "./child.js";
+import { prepareChild, type Capture } from "./child.js";
 import { Workspace } from "./workspace.js";
 
 interface SavedTab {
@@ -40,10 +40,7 @@ export function restoreWorkspace(file: string | undefined, parentId: string, wor
       const {file: childFile,...capture} = saved.capture;
       const manager = SessionManager.open(childFile);
       if (!manager.getBranch().some(entry => entry.id === capture.boundary)) throw new Error(`BTW boundary missing: ${childFile}`);
-      const {origin:_origin,boundary:_boundary,pendingCount:_pending,...config} = capture;
-      const session = new ChildSession(capture.cwd,{...config,file:childFile} as WorkerConfig);
-      session.messages = manager.buildSessionContext().messages;
-      const tab = restored.add({...capture,manager,session},saved.source,saved.id);
+      const tab = restored.add(prepareChild({...capture,manager}),saved.source,saved.id);
       tab.draft = saved.draft || ""; tab.merged = new Map(saved.merged);
     }
     restored.serial = Math.max(restored.serial,Number.isSafeInteger(data.serial) ? data.serial : 0);

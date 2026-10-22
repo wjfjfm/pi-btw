@@ -37,7 +37,9 @@ export default function btw(pi: ExtensionAPI) {
     save();
     for (const cancel of pendingMerges.values()) cancel();
     pendingMerges.clear();
-    generation++; summaryAbort?.abort(); finish?.({kind:"main"}); workspace.dispose(); partial = undefined;
+    generation++; summaryAbort?.abort(); summaryAbort = undefined;
+    creating = false; merging = false;
+    finish?.({kind:"main"}); workspace.dispose(); partial = undefined;
   }
   pi.on("session_start", (_event,ctx) => {
     const id = ctx.sessionManager.getSessionId();
@@ -65,8 +67,10 @@ export default function btw(pi: ExtensionAPI) {
       const tab = workspace.add(child,source);
       save();
       ctx.ui.notify(`BTW ${tab.id} forked from ${source || "main"}: ${child.manager.getSessionFile()}`,"info");
-      void (prompt ? child.session.prompt(prompt) : child.session.ensureStarted()).catch(e => error(ctx,e));
-    } finally { creating = false; }
+      void (prompt ? child.session.prompt(prompt) : child.session.ensureStarted()).catch(e => {
+        if (version === generation) error(ctx,e);
+      });
+    } finally { if (version === generation) creating = false; }
   }
   function selected() {
     const tab = workspace.tabs.get(workspace.current);
@@ -88,7 +92,10 @@ export default function btw(pi: ExtensionAPI) {
       {overlay:true,overlayOptions:{width:76,maxHeight:"100%"}});
     if (!options || version !== generation) return;
     // Keep the BTW view and Esc usable while the summary model is running.
-    void merge(tab,options,ctx).catch(e => { tab.notice = String(e); error(ctx,e); });
+    void merge(tab,options,ctx).catch(e => {
+      if (version !== generation) return;
+      tab.notice = String(e); error(ctx,e);
+    });
   }
   async function merge(tab: Tab, options: MergeOptions, ctx: ExtensionContext) {
     const {destination} = options;
@@ -119,9 +126,11 @@ export default function btw(pi: ExtensionAPI) {
         details:{sessionId:manager.getSessionId(),mode,leaf,options,mergeId}};
       if (destination === 0) pi.sendMessage(message,{triggerTurn:true,deliverAs:"steer"});
       else await workspace.tabs.get(destination)!.child.session.merge(message);
+      if (version !== generation) return;
       const settle = (received: boolean) => {
+        if (version !== generation) return;
         pendingMerges.delete(pendingKey);
-        if (version !== generation || workspace.tabs.get(tab.id) !== tab) return;
+        if (workspace.tabs.get(tab.id) !== tab) return;
         if (!received) {
           tab.notice = `BTW ${tab.id}: merge receipt timed out; source retained. Target may still be queued; check before retrying.`;
           ctx.ui.notify(tab.notice,"warning");
@@ -148,7 +157,9 @@ export default function btw(pi: ExtensionAPI) {
         ctx.ui.notify(tab.notice,"info");
         pendingMerges.set(pendingKey,watchMergeReceipt(checkReceipt,settle));
       }
-    } finally { merging = false; summaryAbort = undefined; }
+    } finally {
+      if (version === generation) { merging = false; summaryAbort = undefined; }
+    }
   }
   async function command(args: string, ctx: ExtensionContext) {
     const [verb,...rest] = args.trim().split(/\s+/);
@@ -196,7 +207,10 @@ export default function btw(pi: ExtensionAPI) {
     try {
       while (workspace.current && version === generation) {
         const tab = selected();
-        void tab.child.session.ensureStarted().catch(e => { tab.notice = String(e); error(ctx,e); });
+        void tab.child.session.ensureStarted().catch(e => {
+          if (version !== generation) return;
+          tab.notice = String(e); error(ctx,e);
+        });
         if (version !== generation) break;
         const action = await ctx.ui.custom<ViewAction>((tui,theme,_keys,done) => {
           finish = done;
@@ -206,9 +220,11 @@ export default function btw(pi: ExtensionAPI) {
           });
           return view;
         },{overlay:true,overlayOptions:{width:"100%",maxHeight:"100%",anchor:"top-left",margin:0}});
-        save(); finish = undefined; view = undefined;
+        if (version === generation) save();
+        finish = undefined; view = undefined;
         if (!action || version !== generation) break;
         try { await perform(action,ctx); } catch (e) {
+          if (version !== generation) break;
           const current = workspace.tabs.get(workspace.current);
           if (current) current.notice = String(e);
           error(ctx,e);
@@ -217,12 +233,14 @@ export default function btw(pi: ExtensionAPI) {
     } finally { showing = false; finish = undefined; view = undefined; }
   }
   async function run(ctx: ExtensionContext,action: ViewAction) {
+    const version = generation;
     try {
       if (ctx.mode !== "tui") throw new Error("BTW requires interactive TUI mode");
       if (creating || merging) throw new Error("BTW operation in progress");
       if (showing) { finish?.(action); return; }
-      await perform(action,ctx); await show(ctx);
-    } catch (e) { error(ctx,e); }
+      await perform(action,ctx);
+      if (version === generation) await show(ctx);
+    } catch (e) { if (version === generation) error(ctx,e); }
   }
   pi.registerCommand("btw",{description:"Fork BTW | list | merge [source|main] | close",
     handler:async (args,ctx) => { await run(ctx,{kind:"command",text:args}); }});
