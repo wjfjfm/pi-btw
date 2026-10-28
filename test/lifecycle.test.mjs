@@ -33,7 +33,7 @@ function fixture(t) {
     },
   };
   const ctx = {
-    mode:'tui',cwd,model:{contextWindow:100000,maxTokens:1000},scopedModels:[],
+    isIdle:()=>true,mode:'tui',cwd,model:{contextWindow:100000,maxTokens:1000},scopedModels:[],
     getSystemPrompt:() => '',isProjectTrusted:() => true,
     modelRegistry:{streamSimple() {
       const stream = createAssistantMessageEventStream();

@@ -125,7 +125,7 @@ test('extension merges only explicitly, queues steering, prevents duplicates, an
     return undefined;
   };
   const ctx = {
-    mode:'tui', cwd:capture.cwd, model, thinkingLevel:'off', scopedModels:[], sessionManager:parent,
+    isIdle:()=>true,mode:'tui', cwd:capture.cwd, model, thinkingLevel:'off', scopedModels:[], sessionManager:parent,
     getSystemPrompt:() => capture.systemPrompt, isProjectTrusted:() => true,
     modelRegistry:{streamSimple:(_model, context) => {summaryRaw=JSON.stringify(context.messages);const stream=createAssistantMessageEventStream();const finish=()=>{stream.push({type:'done',reason:'stop',message:{stopReason:'stop',content:[{type:'text',text:'merged summary'}]}});stream.end();};if(holdSummary)summaryFinish=finish;else finish();return stream;}},
     ui:{select:choose, custom:dialog, notify:(message,type) => notices.push({message,type})},
@@ -356,6 +356,35 @@ test('merge dispatch returns before a slow target response, receipt still requir
   assert.ok(!child.session.messages.some(m=>m.role==='assistant'),'dispatch must not wait for model response');
   await waitFor(()=>hasMergeReceipt(child.manager.getSessionFile(),'slow-target'));
   await waitFor(()=>child.session.messages.some(m=>m.role==='assistant')&&!child.session.isStreaming);
+});
+
+test('worker target retains queued merge after its running tool is aborted', {timeout:30000}, async t=>{
+  const {capture}=await fixture(t);
+  await writeFile(capture.extensionPaths[0], `import {createAssistantMessageEventStream} from '@earendil-works/pi-ai';
+export default function(pi){
+  pi.registerTool({name:'hold_merge',label:'hold',description:'abortable test barrier',parameters:{type:'object',properties:{}},async execute(_id,_args,signal){
+    await new Promise(resolve=>{if(signal.aborted)resolve();else signal.addEventListener('abort',resolve,{once:true});});
+    return {content:[{type:'text',text:'cancelled'}],details:undefined};
+  }});
+  pi.registerProvider('btw-test',{apiKey:'dummy',api:'openai-completions',baseUrl:'http://unused.invalid',models:[${JSON.stringify(model)}],streamSimple:(_model,_context,options)=>{
+    const aborted=options?.signal?.aborted;
+    const message={role:'assistant',content:aborted?[]:[{type:'toolCall',id:'held',name:'hold_merge',arguments:{}}],api:'openai-completions',provider:'btw-test',model:'btw-test',usage:{input:0,output:0,cacheRead:0,cacheWrite:0,totalTokens:0,cost:{input:0,output:0,cacheRead:0,cacheWrite:0,total:0}},stopReason:aborted?'aborted':'toolUse',timestamp:Date.now()};
+    const stream=createAssistantMessageEventStream();stream.push(aborted?{type:'error',reason:'aborted',error:message}:{type:'done',reason:'toolUse',message});stream.end();return stream;
+  }});
+}`);
+  capture.tools.push('hold_merge');
+  const child=await startChild(capture);t.after(()=>child.session.dispose());
+  let entered=false;
+  child.session.subscribe(event=>{if(event.type==='tool_execution_start'&&event.toolName==='hold_merge')entered=true;});
+  const running=child.session.prompt('hold until stopped');await waitFor(()=>entered);
+  const file=child.manager.getSessionFile();
+  await child.session.merge({customType:'pi-btw-merge',content:'merge survives child abort',display:true,details:{mergeId:'worker-abort'}});
+  assert.equal(hasMergeReceipt(file,'worker-abort'),false);
+  await child.session.abort();await running;
+  await waitFor(()=>hasMergeReceipt(file,'worker-abort')&&!child.session.isStreaming);
+  const entries=SessionManager.open(file).getBranch();
+  assert.equal(entries.filter(e=>e.type==='custom_message'&&e.details?.mergeId==='worker-abort').length,1);
+  assert.equal(entries.filter(e=>e.type==='message'&&e.message.role==='toolResult'&&e.message.toolName==='hold_merge').length,1);
 });
 
 test('missing inherited tool fails explicitly, without touching parent', {timeout:30000}, async t => {

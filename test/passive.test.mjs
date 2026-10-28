@@ -7,11 +7,11 @@ import { createAgentSession, DefaultResourceLoader, SessionManager, SettingsMana
 import { createAssistantMessageEventStream } from '@earendil-works/pi-ai';
 import btw from '../dist/index.js';
 
-test('unused BTW registers no model-facing hooks or tools', () => {
+test('unused BTW registers no tools and only inert delivery/lifecycle hooks', () => {
   const events=[],shortcuts=[];
   btw({on:name=>events.push(name),registerCommand:()=>{},registerShortcut:key=>shortcuts.push(key)});
   assert.deepEqual(shortcuts,[]);
-  assert.deepEqual(events,['session_start','message_update','message_end','session_shutdown']);
+  assert.deepEqual(events,['turn_end','agent_settled','session_tree','session_start','message_update','message_end','session_shutdown']);
 });
 
 test('real SDK model request is identical with unused BTW enabled or disabled', async t => {

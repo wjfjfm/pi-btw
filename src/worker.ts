@@ -3,6 +3,7 @@ import {
   DefaultResourceLoader, SettingsManager, SessionManager, type AgentSession, type ExtensionAPI, type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { captureChild, type WorkerConfig } from "./child.js";
+import { createMergeDelivery } from "./merge-delivery.js";
 import { configureNetwork } from "./network.js";
 import { sealPendingCalls, ORIGIN, BRANCH_CONTEXT, BRANCH_INSTRUCTIONS } from "./snapshot.js";
 import { createFooter } from "./footer.js";
@@ -11,6 +12,7 @@ import { sessionPreview } from "./preview.js";
 let session: AgentSession | undefined;
 let api: ExtensionAPI;
 let context: ExtensionContext;
+let delivery: ReturnType<typeof createMergeDelivery>;
 let partial: unknown;
 let config: WorkerConfig;
 let footer: Awaited<ReturnType<typeof createFooter>> | undefined;
@@ -34,6 +36,7 @@ process.on("message", async (request: { id: number; method: string; config?: Wor
         extensionFactories: [
           pi => {
             api = pi;
+            delivery = createMergeDelivery(pi);
             pi.on("session_start", (_event, ctx) => { context = ctx; });
             pi.on("before_agent_start", (event,ctx) => {
               const branch = ctx.sessionManager.getBranch();
@@ -103,8 +106,7 @@ process.on("message", async (request: { id: number; method: string; config?: Wor
       if (!session || !request.message) throw new Error("Not initialized");
       // Acknowledge dispatch, not the entire model turn. The parent independently
       // requires a persisted receipt before marking merged or closing the source.
-      void session.sendCustomMessage(request.message, { triggerTurn: true, deliverAs: "steer" })
-        .catch(error => send({type:"error",error:`BTW merge delivery/run failed: ${String(error)}`}));
+      delivery.send(request.message,context);
     } else if (request.method === "abort") {
       await session?.abort();
     } else if (request.method === "dispose") {

@@ -21,6 +21,7 @@
 - `src/persistence.ts`：工作区 sidecar、草稿及懒恢复。
 - `src/merge.ts` / `src/transcript.ts`：原生分支摘要、可读对话整理及原生图片块。
 - `src/merge-receipt.ts`：目标当前分支的落盘确认与超时监控。
+- `src/merge-delivery.ts`：main/worker 共用的安全边界投递，避免用户 abort 清除 steer 队列后丢失 merge。
 - `src/view.ts` / `src/preview.ts`：原生消息组件、按需历史渲染、首末正文预览。
 - `src/list-dialog.ts` / `src/merge-dialog.ts`：列表快捷键和统一合并弹窗。
 - `src/footer.ts` / `src/network.ts`：原生状态栏和 SDK 网络配置。
@@ -36,7 +37,9 @@
 - Full/Strip 都注入可读对话，不直接注入存储 JSONL。去除记录 ID、parentId、timestamp、usage、模型标识及系统配置，保留正文换行。
 - Full 额外保留 thinking、工具参数/结果及 details、错误状态、隐藏 custom 正文和摘要。工具调用/结果用局部编号关联；图片用原生 image block，不把 base64 当文本发送。
 - Summary 使用原生 `generateBranchSummary()`；失败或空摘要不投递。确认并通过校验后立即定位合并目标，摘要与投递后台继续，窗口和 Esc 保持可用；失败保留源，不自动跳回，迟到回执不抢焦点。
-- 合并默认 main / Close Yes / Summary No / Strip。Merge to 左右切换显示纯名称；Enter 打开完整目标树列表，选中或取消后回到弹窗，不直接合并。排除自身和关闭目标。发送使用 steer，不等待目标整轮回答。
+- 合并默认 main / Close Yes / Summary No / Strip。Merge to 左右切换显示纯名称；Enter 打开完整目标树列表，选中或取消后回到弹窗，不直接合并。排除自身和关闭目标。不等待目标整轮回答。空闲时直接启动 merge 回合；忙碌时保存在模块待投递列表，工具批次结束后通过 turn_end entries 注入。
+- 手动中止目标执行后，已经确认提交的 merge 仍在工具批次完成的安全边界落盘，不自动重启模型或重放工具。启动阶段中止、未发生 turn_end 时，agent_settled 使用 triggerTurn:false 追加。不要把 merge 放回会被 TUI clearQueue 清除的 steer 队列，也不做超时自动重发。
+- 安全投递器仅处理本实例持有且 session ID 匹配的消息；workspace reset/shutdown 和 session_tree 清除待投递。空列表的边界 hooks 不改上下文、不请求继续；正常非中止 turn_end 合并后请求一次 continuation，并保留其他扩展 entries。
 - **入队不等于合并成功。**必须在目标会话当前分支查到唯一 merge ID 的落盘记录，才标记合并并考虑关闭源。两分钟超时保留源，不自动重发；迟到投递仍可能发生。
 - 即便确认成功，源有新消息、运行任务或草稿时也保留。源文件始终保留，关闭父分支不关闭后代。
 - 关闭当前分支直接回 main，不二次确认；关闭后台分支不抢焦点。无前后切换快捷键，Ctrl+B/F 留给原生编辑器。
